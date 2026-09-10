@@ -1,0 +1,9 @@
+[build]
+target = "index.html"
+dist = "dist"
+
+[watch]
+ignore = ["target", "dist", ".git"]
+
+[serve]
+open = true

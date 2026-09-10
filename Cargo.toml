@@ -7,6 +7,12 @@ edition = "2024"
 bevy = "0.19.1"
 rand = "0.10.2"
 
+# rand/uuid pull in getrandom, which has no default source of randomness on
+# wasm32-unknown-unknown (the target used for web builds) — route it through
+# the browser's Web Crypto API instead.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
+
 # Run with `cargo run --features dev` to enable dynamic linking, which
 # drastically speeds up incremental builds during development. Not for
 # release builds (requires shipping bevy_dylib alongside the binary).
