@@ -6,3 +6,18 @@ edition = "2024"
 [dependencies]
 bevy = "0.19.1"
 rand = "0.10.2"
+
+# Run with `cargo run --features dev` to enable dynamic linking, which
+# drastically speeds up incremental builds during development. Not for
+# release builds (requires shipping bevy_dylib alongside the binary).
+[features]
+dev = ["bevy/dynamic_linking"]
+
+# Bevy is unusably slow at runtime when compiled fully unoptimized, so keep
+# dependencies (including bevy itself) optimized while leaving our own crate
+# unoptimized for fast incremental compiles.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
