@@ -1,0 +1,3 @@
+# Face photos stay viewer-facing, with a horizontal squash to suggest a turn
+
+Employee photos are ordinary front-facing headshots, not true side-profile shots, and re-photographing everyone in profile isn't practical. Rather than pasting a photo flat onto the profile body (which would read as a face floating oddly sideways) or requiring profile photos from everyone, each face gets a horizontal aspect adjustment (squash/skew) applied when it's composited onto the head slot — giving a slight illusion that the head has turned toward the direction the Character faces, while keeping the person clearly recognizable. This is a transform applied at compositing time; it places no requirement on the source photo itself.
