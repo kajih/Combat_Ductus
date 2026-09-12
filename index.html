@@ -18,7 +18,10 @@
             display: block;
         }
     </style>
-    <link data-trunk rel="rust" href="Cargo.toml" />
+    <!-- data-bin is required now that the crate has a second binary
+         (src/bin/server.rs, native-only) alongside the client - without
+         it Trunk can't tell which wasm artifact to embed. -->
+    <link data-trunk rel="rust" href="Cargo.toml" data-bin="combat_ductus" />
 </head>
 <body></body>
 </html>

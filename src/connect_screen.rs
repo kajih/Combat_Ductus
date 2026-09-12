@@ -61,18 +61,10 @@ impl Plugin for ConnectScreenPlugin {
         app.init_state::<AppState>()
             .init_resource::<LatestSnapshot>()
             .insert_non_send(ConnectionSlot::default())
-            .add_systems(Startup, spawn_camera)
             .add_systems(OnEnter(AppState::Connecting), spawn_connect_screen)
             .add_systems(OnExit(AppState::Connecting), despawn_connect_screen)
             .add_systems(Update, poll_connection);
     }
-}
-
-// A minimal camera so the Connect screen's UI is actually visible. The
-// stage-and-camera issue owns getting the *gameplay* camera framing right;
-// this just needs something for bevy_ui to render onto in the meantime.
-fn spawn_camera(mut commands: Commands) {
-    commands.spawn(Camera2d);
 }
 
 fn spawn_connect_screen(mut commands: Commands) {
