@@ -90,7 +90,7 @@ Both milestones share one crate with a clear module boundary between pure combat
 - Voiced/recorded audio, sound effects, and music.
 - Hitbox/hurtbox rectangle collision (only the simpler 1D range check is in scope).
 - A match timer, draw conditions, or any time-based win condition.
-- Rematch/restart flow after a Match ends.
+- ~~Rematch/restart flow after a Match ends.~~ **Superseded**: real playtesting of `punch-kick-health-depletion` showed that ending a Match with zero way to continue (refresh-to-restart) is a real gap, not an acceptable simplification. See `docs/issues/combat-foundation/restart-match.md`.
 - Spectator mode (3rd+ connections) — noted as a plausible future extension of the server's connection tracking, not designed here.
 - Internet-facing hosting, matchmaking, or server discovery — LAN-only with manual IP entry is permanent for this project's scope, not a stepping stone.
 - Client-side prediction, rollback, or any reconciliation logic — the client is a pure renderer per ADR 0005.
