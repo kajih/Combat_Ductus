@@ -85,13 +85,13 @@ Both milestones share one crate with a clear module boundary between pure combat
 ## Out of Scope
 
 - A second real client connecting (both players controlled) — M1 keeps Player 2 as a permanent Idle Opponent; real two-client play is a later milestone.
-- Character select screen, and any roster content beyond one hardcoded Character per player slot.
+- Character select screen, and any roster content beyond one hardcoded Character per player slot. Still out of scope for this PRD's M0/M1 milestones, but now tracked as a future feature — see `docs/issues/character-select/pick-character-on-connect-screen.md`.
 - Real employee face photos, consent, and any photo-sourcing pipeline.
 - Voiced/recorded audio, sound effects, and music.
 - Hitbox/hurtbox rectangle collision (only the simpler 1D range check is in scope).
 - A match timer, draw conditions, or any time-based win condition.
 - ~~Rematch/restart flow after a Match ends.~~ **Superseded**: real playtesting of `punch-kick-health-depletion` showed that ending a Match with zero way to continue (refresh-to-restart) is a real gap, not an acceptable simplification. See `docs/issues/combat-foundation/restart-match.md`.
-- Spectator mode (3rd+ connections) — noted as a plausible future extension of the server's connection tracking, not designed here.
+- Spectator mode (3rd+ connections) — noted as a plausible future extension of the server's connection tracking, not designed here. Now tracked as a future feature — see `docs/issues/spectator-mode/spectator-connections.md`.
 - Internet-facing hosting, matchmaking, or server discovery — LAN-only with manual IP entry is permanent for this project's scope, not a stepping stone.
 - Client-side prediction, rollback, or any reconciliation logic — the client is a pure renderer per ADR 0005.
 - Exact tuning values (attack ranges, cooldown/lockout durations) — left as placeholder constants to be tuned during/after implementation.
