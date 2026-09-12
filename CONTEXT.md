@@ -30,6 +30,13 @@ _Avoid_: Hit
 **Kick**:
 A Character's heavy attack, dealing 2 points of damage to the opponent's Health.
 
+**Special**:
+A Character's third attack category, alongside Punch and Kick — distinguished from both by ignoring the normal range/Facing hitbox and by being gated on usage conditions (minimum cast range, cooldown, etc.) rather than damage or telegraph. See [0008](docs/adr/0008-motivational-speech-ignores-position.md).
+_Avoid_: Ultimate, super
+
+**Motivational Speech**:
+The first Special. Deals 1 point of damage to the opponent's Health regardless of distance or Facing, depicted as the Character giving a speech via a large speech-bubble VFX. Can only be cast when the opponent is farther away than a minimum range, and is further gated by a cooldown and a recent-damage lockout.
+
 **Jump**:
 Vertical repositioning available to either Character. Purely movement — a Character cannot Punch or Kick while airborne in v1.
 
