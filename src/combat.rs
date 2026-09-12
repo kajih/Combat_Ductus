@@ -73,6 +73,16 @@ pub const SPECIAL_COOLDOWN_TICKS: u64 = 90;
 /// Placeholder tuning value.
 pub const SPECIAL_LOCKOUT_TICKS: u64 = 60;
 
+/// Ground movement speed, in world units per simulation tick. Placeholder
+/// tuning value.
+pub const MOVE_SPEED_PER_TICK: f32 = 0.05;
+/// Half the Stage's walkable width, in world units, measured from center.
+/// A Character's position is clamped to `[-STAGE_HALF_WIDTH,
+/// STAGE_HALF_WIDTH]` so it can't walk off the Stage. Placeholder tuning
+/// value - exact bounds (and how they relate to the Stage art's actual
+/// pixel width) are deferred.
+pub const STAGE_HALF_WIDTH: f32 = 6.0;
+
 /// One Character's simulated state within a Match.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CharacterState {
@@ -147,6 +157,21 @@ impl MatchState {
     /// step, regardless of whether any input arrived.
     pub fn advance_tick(&mut self) {
         self.tick += 1;
+    }
+
+    /// Move `player` by `delta` world units (positive = toward the
+    /// positive-X direction, regardless of that Character's own Facing -
+    /// Facing never changes, per ADR 0002, and is unrelated to which way
+    /// movement pushes a Character), clamped so they can't walk off the
+    /// Stage. A no-op once the Match has ended.
+    pub fn move_player(&mut self, player: Player, delta: f32) {
+        if self.has_ended() {
+            return;
+        }
+
+        let character = self.character_mut(player);
+        character.position =
+            (character.position + delta).clamp(-STAGE_HALF_WIDTH, STAGE_HALF_WIDTH);
     }
 
     /// Attempt `attack` by `attacker` against their opponent at the current
@@ -436,5 +461,45 @@ mod tests {
         assert_eq!(m.p2.health, 0);
         assert!(m.has_ended());
         assert_eq!(m.winner, Some(Player::P1));
+    }
+
+    #[test]
+    fn move_player_applies_delta_in_either_direction() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+
+        m.move_player(Player::P1, MOVE_SPEED_PER_TICK);
+        assert_eq!(m.p1.position, MOVE_SPEED_PER_TICK);
+
+        m.move_player(Player::P1, -2.0 * MOVE_SPEED_PER_TICK);
+        assert_eq!(m.p1.position, -MOVE_SPEED_PER_TICK);
+    }
+
+    #[test]
+    fn move_player_clamps_at_the_positive_stage_bound() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(STAGE_HALF_WIDTH - 0.01, Facing::Right);
+
+        m.move_player(Player::P1, 10.0);
+        assert_eq!(m.p1.position, STAGE_HALF_WIDTH);
+    }
+
+    #[test]
+    fn move_player_clamps_at_the_negative_stage_bound() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(-STAGE_HALF_WIDTH + 0.01, Facing::Right);
+
+        m.move_player(Player::P1, -10.0);
+        assert_eq!(m.p1.position, -STAGE_HALF_WIDTH);
+    }
+
+    #[test]
+    fn move_player_does_nothing_after_the_match_has_ended() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+        m.winner = Some(Player::P2);
+
+        m.move_player(Player::P1, 1.0);
+        assert_eq!(m.p1.position, 0.0);
     }
 }

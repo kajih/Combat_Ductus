@@ -12,7 +12,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button as WidgetButton};
 use combat_ductus::client_net::{Connection, ConnectionEvent};
-use combat_ductus::net_protocol::StateSnapshot;
+use combat_ductus::net_protocol::{InputEvent, StateSnapshot};
 
 const DEFAULT_SERVER_ADDRESS: &str = "127.0.0.1:9000";
 
@@ -51,8 +51,23 @@ struct StatusText;
 /// never is). A pre-inserted *non-send* resource, mutated directly by
 /// systems that declare `NonSendMut<ConnectionSlot>`, sidesteps both: access
 /// is pinned to the main thread instead of requiring thread-safety.
+///
+/// `pub(crate)` (not private) so other client-only modules - e.g. the
+/// gameplay input module - can send input events through the same
+/// connection, via `send_input` below, without this module handing out the
+/// underlying `Connection` (or the connect/disconnect logic) itself.
 #[derive(Default)]
-struct ConnectionSlot(Option<Connection>);
+pub(crate) struct ConnectionSlot(Option<Connection>);
+
+impl ConnectionSlot {
+    /// Sends an input event if currently connected; silently does nothing
+    /// otherwise (e.g. before a connection exists, or after it dropped).
+    pub(crate) fn send_input(&mut self, event: InputEvent) {
+        if let Some(connection) = self.0.as_mut() {
+            connection.send_input(event);
+        }
+    }
+}
 
 pub struct ConnectScreenPlugin;
 
