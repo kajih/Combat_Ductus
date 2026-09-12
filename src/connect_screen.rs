@@ -22,6 +22,10 @@ pub enum AppState {
     #[default]
     Connecting,
     InMatch,
+    /// The Match has ended (`net_protocol::MatchStatus::Ended`) - see
+    /// `match_end_screen`, which is what actually transitions into and out
+    /// of this state; this module only owns Connecting <-> InMatch.
+    MatchEnded,
 }
 
 /// The most recent state snapshot received from the server, if any.
@@ -219,12 +223,13 @@ fn poll_connection(
 
     if should_disconnect {
         slot.0 = None;
-        // If we drop out of an in-progress Match, fall back to the Connect
-        // screen so the player isn't left staring at a frozen game with no
-        // way to retry. (The disconnect status text above won't actually be
-        // visible in that case - the Connect screen doesn't exist yet this
-        // frame - but the transition itself is what matters here.)
-        if *state.get() == AppState::InMatch {
+        // If we drop out of an in-progress Match (or the Match-Ended
+        // screen), fall back to the Connect screen so the player isn't left
+        // staring at a frozen, uninteractive view with no way to retry.
+        // (The disconnect status text above won't actually be visible in
+        // that case - the Connect screen doesn't exist yet this frame - but
+        // the transition itself is what matters here.)
+        if *state.get() != AppState::Connecting {
             next_state.set(AppState::Connecting);
         }
     }

@@ -113,10 +113,10 @@ fn despawn_match_characters(mut commands: Commands, roots: Query<Entity, With<Ch
     }
 }
 
-fn character_snapshot_for<'a>(
-    snapshot: &'a combat_ductus::net_protocol::StateSnapshot,
+fn character_snapshot_for(
+    snapshot: &combat_ductus::net_protocol::StateSnapshot,
     slot: Slot,
-) -> &'a CharacterSnapshot {
+) -> &CharacterSnapshot {
     match slot {
         Slot::P1 => &snapshot.p1,
         Slot::P2 => &snapshot.p2,

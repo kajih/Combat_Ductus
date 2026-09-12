@@ -7,6 +7,7 @@ mod connect_screen;
 mod health_hud;
 mod input;
 mod match_characters;
+mod match_end_screen;
 mod stage;
 
 use asset_diagnostics::AssetDiagnosticsPlugin;
@@ -15,6 +16,7 @@ use connect_screen::ConnectScreenPlugin;
 use health_hud::HealthHudPlugin;
 use input::PlayerInputPlugin;
 use match_characters::MatchCharactersPlugin;
+use match_end_screen::MatchEndScreenPlugin;
 use stage::StagePlugin;
 
 fn main() {
@@ -38,5 +40,6 @@ fn main() {
         .add_plugins(MatchCharactersPlugin)
         .add_plugins(PlayerInputPlugin)
         .add_plugins(HealthHudPlugin)
+        .add_plugins(MatchEndScreenPlugin)
         .run();
 }
