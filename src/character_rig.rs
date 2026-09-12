@@ -95,13 +95,17 @@ struct BodyTypeGeometry {
     canvas_size: Vec2,
     head_center: Vec2,
     head_diameter: f32,
+    /// Image-space Y of the sole of the idle-pose foot (the lowest opaque
+    /// pixel of `leg_idle`) - lets callers (e.g. placing a Character on
+    /// the Stage) align feet to a floor line instead of guessing.
+    feet_bottom_y: f32,
 }
 
 /// Pixel geometry measured directly from the committed art (see the module
 /// doc comment) - canvas size, per body type, is shared across every part;
 /// head center/diameter come from the light-fill circle in the torso PNG.
 /// Image-space (Y grows downward, origin top-left); converted to Bevy's
-/// Y-up local space in `head_local_offset`.
+/// Y-up local space in `head_local_offset`/`feet_local_offset_y`.
 fn body_type_geometry(body_type: BodyType) -> BodyTypeGeometry {
     match body_type {
         BodyType::Small => BodyTypeGeometry {
@@ -109,18 +113,21 @@ fn body_type_geometry(body_type: BodyType) -> BodyTypeGeometry {
             canvas_size: Vec2::new(598.0, 520.0),
             head_center: Vec2::new(185.5, 77.5),
             head_diameter: 121.0,
+            feet_bottom_y: 512.0,
         },
         BodyType::Medium => BodyTypeGeometry {
             asset_prefix: "medium",
             canvas_size: Vec2::new(690.0, 600.0),
             head_center: Vec2::new(214.5, 89.5),
             head_diameter: 141.0,
+            feet_bottom_y: 590.0,
         },
         BodyType::Large => BodyTypeGeometry {
             asset_prefix: "large",
             canvas_size: Vec2::new(782.0, 680.0),
             head_center: Vec2::new(243.5, 101.5),
             head_diameter: 159.0,
+            feet_bottom_y: 669.0,
         },
     }
 }
@@ -144,6 +151,16 @@ fn head_local_offset(body_type: BodyType, facing: Facing) -> Vec2 {
     let canonical_x = geometry.head_center.x - geometry.canvas_size.x / 2.0;
     let y = geometry.canvas_size.y / 2.0 - geometry.head_center.y;
     Vec2::new(facing_sign(facing) * canonical_x, y)
+}
+
+/// How far below the Character root's own origin (the same origin the
+/// torso/arm/leg sprites share) the sole of the foot sits, at scale 1.0.
+/// Facing-independent - mirroring is purely horizontal, and this is a Y
+/// value. Callers placing a Character on a floor line (e.g. the Stage)
+/// use this instead of guessing an offset by eye.
+pub fn feet_local_offset_y(body_type: BodyType) -> f32 {
+    let geometry = body_type_geometry(body_type);
+    geometry.canvas_size.y / 2.0 - geometry.feet_bottom_y
 }
 
 fn limb_asset_suffix(limb: Limb, pose: LimbPose) -> &'static str {
@@ -297,6 +314,21 @@ mod tests {
         let offset = head_local_offset(BodyType::Medium, Facing::Right);
         assert!((offset.x - (-130.5)).abs() < f32::EPSILON);
         assert!((offset.y - 210.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn feet_offset_matches_measured_art_for_medium() {
+        // Measured directly from medium_leg_idle.png: canvas height 600,
+        // lowest opaque pixel (the sole) at y=590.
+        let offset = feet_local_offset_y(BodyType::Medium);
+        assert!((offset - (-290.0)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn feet_sit_below_the_character_origin_for_every_body_type() {
+        for body_type in [BodyType::Small, BodyType::Medium, BodyType::Large] {
+            assert!(feet_local_offset_y(body_type) < 0.0);
+        }
     }
 
     #[test]
