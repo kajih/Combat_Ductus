@@ -2,6 +2,7 @@
 //! and the `server` binary. See `docs/prd/combat-foundation-m0-m1.md` for
 //! the module boundaries this follows.
 
+pub mod client_net;
 pub mod combat;
 pub mod net_protocol;
 
