@@ -4,13 +4,13 @@ use bevy::prelude::*;
 mod asset_diagnostics;
 mod character_rig;
 mod connect_screen;
-mod idle_character;
+mod match_characters;
 mod stage;
 
 use asset_diagnostics::AssetDiagnosticsPlugin;
 use character_rig::CharacterRigPlugin;
 use connect_screen::ConnectScreenPlugin;
-use idle_character::IdleCharacterPlugin;
+use match_characters::MatchCharactersPlugin;
 use stage::StagePlugin;
 
 fn main() {
@@ -31,6 +31,6 @@ fn main() {
         .add_plugins(StagePlugin)
         .add_plugins(ConnectScreenPlugin)
         .add_plugins(CharacterRigPlugin)
-        .add_plugins(IdleCharacterPlugin)
+        .add_plugins(MatchCharactersPlugin)
         .run();
 }
