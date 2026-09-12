@@ -182,6 +182,13 @@ fn step_simulation(
             // Jump's actual airborne arc is a later issue; the skeleton just
             // proves an attack/movement input can reach the simulation.
             InputEvent::Jump => {}
+            InputEvent::RequestRestart => {
+                // Only honored once the Match has actually ended - this
+                // resets a concluded Match, not an active one.
+                if match_state.0.has_ended() {
+                    match_state.0 = MatchState::new();
+                }
+            }
             other => {
                 if let Some(attack) = other.as_attack() {
                     match_state.0.apply_attack(Player::P1, attack);
@@ -237,7 +244,7 @@ mod tests {
     use crate::combat::{
         ATTACK_RANGE, KICK_DAMAGE, PUNCH_DAMAGE, STAGE_HALF_WIDTH, STARTING_HEALTH,
     };
-    use crate::net_protocol::InputEvent;
+    use crate::net_protocol::{InputEvent, MatchStatus};
     use std::time::Duration as StdDuration;
 
     #[tokio::test]
@@ -493,6 +500,96 @@ mod tests {
             let snapshot = read_snapshot(&mut ws).await;
             assert_eq!(snapshot.p2.health, STARTING_HEALTH);
         }
+    }
+
+    #[tokio::test]
+    async fn restart_request_is_ignored_while_the_match_is_in_progress() {
+        let ServerParts {
+            local_addr,
+            incoming_rx,
+            outgoing_tx,
+        } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx));
+
+        let url = format!("ws://{local_addr}");
+        let (mut ws, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("client should be able to connect");
+
+        move_p1_into_attack_range_of_p2(&mut ws).await;
+        send_event(&mut ws, InputEvent::Punch).await;
+
+        let hit = tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                let snapshot = read_snapshot(&mut ws).await;
+                if snapshot.p2.health < STARTING_HEALTH {
+                    return snapshot;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the punch to land");
+        assert_eq!(hit.p2.health, STARTING_HEALTH - PUNCH_DAMAGE);
+
+        send_event(&mut ws, InputEvent::RequestRestart).await;
+
+        // Give it several ticks to (incorrectly) reset if it were going
+        // to - Health should stay right where the punch left it, and
+        // status should never become anything but InProgress, since the
+        // Match hasn't ended.
+        for _ in 0..10 {
+            let snapshot = read_snapshot(&mut ws).await;
+            assert_eq!(snapshot.p2.health, STARTING_HEALTH - PUNCH_DAMAGE);
+            assert_eq!(snapshot.status, MatchStatus::InProgress);
+        }
+    }
+
+    #[tokio::test]
+    async fn restart_resets_the_match_once_it_has_ended() {
+        let ServerParts {
+            local_addr,
+            incoming_rx,
+            outgoing_tx,
+        } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx));
+
+        let url = format!("ws://{local_addr}");
+        let (mut ws, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("client should be able to connect");
+
+        move_p1_into_attack_range_of_p2(&mut ws).await;
+        for _ in 0..STARTING_HEALTH {
+            send_event(&mut ws, InputEvent::Punch).await;
+        }
+
+        let ended = tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                let snapshot = read_snapshot(&mut ws).await;
+                if matches!(snapshot.status, MatchStatus::Ended { .. }) {
+                    return snapshot;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the match to end");
+        assert_eq!(ended.p2.health, 0);
+
+        send_event(&mut ws, InputEvent::RequestRestart).await;
+
+        let restarted = tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                let snapshot = read_snapshot(&mut ws).await;
+                if matches!(snapshot.status, MatchStatus::InProgress) {
+                    return snapshot;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the match to restart");
+
+        assert_eq!(restarted.p1.health, STARTING_HEALTH);
+        assert_eq!(restarted.p2.health, STARTING_HEALTH);
     }
 
     async fn send_event(

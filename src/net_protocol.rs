@@ -27,17 +27,25 @@ pub enum InputEvent {
     Kick,
     /// The special (H) key was pressed.
     Special,
+    /// The restart control on the Match-Ended screen was activated. Not
+    /// tied to a specific player the way the other variants are - the
+    /// server only honors this once the Match has actually ended (see
+    /// `restart-match.md`), regardless of who sent it.
+    RequestRestart,
 }
 
 impl InputEvent {
     /// The `combat::Attack` this input triggers, if it's an attack input at
-    /// all (movement/jump events return `None`).
+    /// all (movement/jump/restart events return `None`).
     pub fn as_attack(self) -> Option<Attack> {
         match self {
             InputEvent::Punch => Some(Attack::Punch),
             InputEvent::Kick => Some(Attack::Kick),
             InputEvent::Special => Some(Attack::Special),
-            InputEvent::MoveLeft(_) | InputEvent::MoveRight(_) | InputEvent::Jump => None,
+            InputEvent::MoveLeft(_)
+            | InputEvent::MoveRight(_)
+            | InputEvent::Jump
+            | InputEvent::RequestRestart => None,
         }
     }
 }
@@ -97,6 +105,7 @@ mod tests {
             InputEvent::Punch,
             InputEvent::Kick,
             InputEvent::Special,
+            InputEvent::RequestRestart,
         ] {
             assert_eq!(round_trip(&event), event);
         }
