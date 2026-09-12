@@ -49,6 +49,11 @@ pub struct CharacterSnapshot {
     pub facing: Facing,
     pub health: u8,
     pub airborne: bool,
+    /// Which attack's arm/leg swing is currently animating, if any - only
+    /// ever `Punch` or `Kick` (Special's feedback is a separate VFX, not a
+    /// limb swing). Set the instant the attack is thrown, regardless of
+    /// whether it lands, and cleared automatically a short time later.
+    pub attacking: Option<Attack>,
 }
 
 /// Whether the Match is still being played or has already ended, and if so
@@ -106,12 +111,14 @@ mod tests {
                 facing: Facing::Right,
                 health: 3,
                 airborne: false,
+                attacking: Some(Attack::Punch),
             },
             p2: CharacterSnapshot {
                 position: 1.5,
                 facing: Facing::Left,
                 health: 5,
                 airborne: true,
+                attacking: None,
             },
             status: MatchStatus::InProgress,
         };

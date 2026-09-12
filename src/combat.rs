@@ -83,6 +83,12 @@ pub const MOVE_SPEED_PER_TICK: f32 = 0.05;
 /// pixel width) are deferred.
 pub const STAGE_HALF_WIDTH: f32 = 6.0;
 
+/// How long a Punch/Kick's visible arm/leg swing lasts, in ticks -
+/// triggered the instant the attack is thrown, regardless of whether it
+/// lands (a player should see their attack attempt even on a whiff).
+/// Placeholder tuning value; ~1/3 second at the server's ~30Hz tick rate.
+pub const ATTACK_ANIMATION_TICKS: u8 = 10;
+
 /// One Character's simulated state within a Match.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CharacterState {
@@ -96,6 +102,11 @@ pub struct CharacterState {
     /// The tick this Character was last hit, if ever. The Special
     /// recent-damage lockout is measured from this.
     pub last_hit_tick: Option<u64>,
+    /// Which attack's arm/leg swing is currently animating, if any. Only
+    /// ever `Punch` or `Kick` - Special has no limb swing (its feedback is
+    /// the speech-bubble VFX, a separate issue).
+    pub attack_animation: Option<Attack>,
+    attack_animation_ticks_remaining: u8,
 }
 
 impl CharacterState {
@@ -107,6 +118,22 @@ impl CharacterState {
             airborne: false,
             special_last_cast_tick: None,
             last_hit_tick: None,
+            attack_animation: None,
+            attack_animation_ticks_remaining: 0,
+        }
+    }
+
+    fn start_attack_animation(&mut self, attack: Attack) {
+        self.attack_animation = Some(attack);
+        self.attack_animation_ticks_remaining = ATTACK_ANIMATION_TICKS;
+    }
+
+    fn tick_attack_animation(&mut self) {
+        if self.attack_animation_ticks_remaining > 0 {
+            self.attack_animation_ticks_remaining -= 1;
+            if self.attack_animation_ticks_remaining == 0 {
+                self.attack_animation = None;
+            }
         }
     }
 }
@@ -157,6 +184,8 @@ impl MatchState {
     /// step, regardless of whether any input arrived.
     pub fn advance_tick(&mut self) {
         self.tick += 1;
+        self.p1.tick_attack_animation();
+        self.p2.tick_attack_animation();
     }
 
     /// Move `player` by `delta` world units (positive = toward the
@@ -201,6 +230,14 @@ impl MatchState {
                 can_cast_special(a, d, tick)
             }
         };
+
+        // Punch/Kick's visible swing plays regardless of whether the
+        // attack lands - a player should see their attack attempt even on
+        // a whiff. Special has no limb swing (separate VFX, separate
+        // issue).
+        if matches!(attack, Attack::Punch | Attack::Kick) {
+            self.character_mut(attacker).start_attack_animation(attack);
+        }
 
         if !landed {
             return false;
@@ -501,5 +538,70 @@ mod tests {
 
         m.move_player(Player::P1, 1.0);
         assert_eq!(m.p1.position, 0.0);
+    }
+
+    #[test]
+    fn punch_starts_the_attack_animation_even_when_it_whiffs() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+        m.p2 = state_at(100.0, Facing::Left); // far out of range
+
+        assert!(!m.apply_attack(Player::P1, Attack::Punch));
+        assert_eq!(m.p1.attack_animation, Some(Attack::Punch));
+    }
+
+    #[test]
+    fn kick_starts_the_attack_animation_when_it_lands() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+        m.p2 = state_at(1.0, Facing::Left);
+
+        assert!(m.apply_attack(Player::P1, Attack::Kick));
+        assert_eq!(m.p1.attack_animation, Some(Attack::Kick));
+    }
+
+    #[test]
+    fn special_never_starts_an_attack_animation() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+        m.p2 = state_at(SPECIAL_MIN_RANGE + 1.0, Facing::Left);
+
+        assert!(m.apply_attack(Player::P1, Attack::Special));
+        assert_eq!(m.p1.attack_animation, None);
+    }
+
+    #[test]
+    fn attack_animation_clears_after_its_duration() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+        m.p2 = state_at(1.0, Facing::Left);
+
+        m.apply_attack(Player::P1, Attack::Punch);
+        assert_eq!(m.p1.attack_animation, Some(Attack::Punch));
+
+        for _ in 0..ATTACK_ANIMATION_TICKS - 1 {
+            m.advance_tick();
+            assert_eq!(m.p1.attack_animation, Some(Attack::Punch));
+        }
+
+        m.advance_tick();
+        assert_eq!(m.p1.attack_animation, None);
+    }
+
+    #[test]
+    fn a_second_attack_restarts_the_animation_duration() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+        m.p2 = state_at(1.0, Facing::Left);
+
+        m.apply_attack(Player::P1, Attack::Punch);
+        for _ in 0..ATTACK_ANIMATION_TICKS - 1 {
+            m.advance_tick();
+        }
+        // One tick from clearing - a fresh attack now should restart the
+        // full duration rather than clearing on the next tick anyway.
+        m.apply_attack(Player::P1, Attack::Kick);
+        m.advance_tick();
+        assert_eq!(m.p1.attack_animation, Some(Attack::Kick));
     }
 }

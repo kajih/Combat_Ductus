@@ -227,13 +227,16 @@ fn character_snapshot(character: &crate::combat::CharacterState) -> CharacterSna
         facing: character.facing,
         health: character.health,
         airborne: character.airborne,
+        attacking: character.attack_animation,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::combat::{STAGE_HALF_WIDTH, STARTING_HEALTH};
+    use crate::combat::{
+        ATTACK_RANGE, KICK_DAMAGE, PUNCH_DAMAGE, STAGE_HALF_WIDTH, STARTING_HEALTH,
+    };
     use crate::net_protocol::InputEvent;
     use std::time::Duration as StdDuration;
 
@@ -403,6 +406,142 @@ mod tests {
             let snapshot = read_snapshot(&mut ws).await;
             assert_eq!(snapshot.p1.position, settled);
         }
+    }
+
+    #[tokio::test]
+    async fn punch_lands_and_reduces_player_twos_health_when_in_range() {
+        let ServerParts {
+            local_addr,
+            incoming_rx,
+            outgoing_tx,
+        } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx));
+
+        let url = format!("ws://{local_addr}");
+        let (mut ws, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("client should be able to connect");
+
+        move_p1_into_attack_range_of_p2(&mut ws).await;
+        send_event(&mut ws, InputEvent::Punch).await;
+
+        let hit = tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                let snapshot = read_snapshot(&mut ws).await;
+                if snapshot.p2.health < STARTING_HEALTH {
+                    return snapshot;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the punch to land");
+
+        assert_eq!(hit.p2.health, STARTING_HEALTH - PUNCH_DAMAGE);
+    }
+
+    #[tokio::test]
+    async fn kick_lands_and_reduces_player_twos_health_by_two_when_in_range() {
+        let ServerParts {
+            local_addr,
+            incoming_rx,
+            outgoing_tx,
+        } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx));
+
+        let url = format!("ws://{local_addr}");
+        let (mut ws, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("client should be able to connect");
+
+        move_p1_into_attack_range_of_p2(&mut ws).await;
+        send_event(&mut ws, InputEvent::Kick).await;
+
+        let hit = tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                let snapshot = read_snapshot(&mut ws).await;
+                if snapshot.p2.health < STARTING_HEALTH {
+                    return snapshot;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the kick to land");
+
+        assert_eq!(hit.p2.health, STARTING_HEALTH - KICK_DAMAGE);
+    }
+
+    #[tokio::test]
+    async fn attacks_do_not_land_when_thrown_out_of_range() {
+        let ServerParts {
+            local_addr,
+            incoming_rx,
+            outgoing_tx,
+        } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx));
+
+        let url = format!("ws://{local_addr}");
+        let (mut ws, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("client should be able to connect");
+
+        // P1 and P2 start far apart (see combat::MatchState::new) - well
+        // out of Punch/Kick range - so throwing immediately should whiff.
+        send_event(&mut ws, InputEvent::Punch).await;
+        send_event(&mut ws, InputEvent::Kick).await;
+
+        for _ in 0..10 {
+            let snapshot = read_snapshot(&mut ws).await;
+            assert_eq!(snapshot.p2.health, STARTING_HEALTH);
+        }
+    }
+
+    async fn send_event(
+        ws: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        event: InputEvent,
+    ) {
+        ws.send(Message::Text(serde_json::to_string(&event).unwrap().into()))
+            .await
+            .expect("send should succeed");
+    }
+
+    /// Sends P1 running toward P2 until they're within Punch/Kick range,
+    /// then stops and waits for the position to settle - so a subsequent
+    /// attack test isn't racing against P1 still drifting into or out of
+    /// range from residual movement.
+    async fn move_p1_into_attack_range_of_p2(
+        ws: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    ) {
+        send_event(ws, InputEvent::MoveRight(true)).await;
+
+        tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                let snapshot = read_snapshot(ws).await;
+                if (snapshot.p2.position - snapshot.p1.position).abs() <= ATTACK_RANGE {
+                    return;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting to get within attack range");
+
+        send_event(ws, InputEvent::MoveRight(false)).await;
+
+        tokio::time::timeout(StdDuration::from_secs(5), async {
+            let mut previous = read_snapshot(ws).await.p1.position;
+            loop {
+                let current = read_snapshot(ws).await.p1.position;
+                if current == previous {
+                    return;
+                }
+                previous = current;
+            }
+        })
+        .await
+        .expect("timed out waiting for movement to settle");
     }
 
     async fn read_snapshot(

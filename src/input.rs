@@ -1,8 +1,9 @@
-//! Captures gameplay keyboard input (A/D movement, for now) and forwards
-//! it to the server as `net_protocol::InputEvent`s - the client itself
-//! never simulates movement, per ADR 0005; it only reports which keys are
-//! down and renders whatever position the server reports back. See
-//! `docs/issues/combat-foundation/ground-movement.md`.
+//! Captures gameplay keyboard input (A/D movement, J/K attacks) and
+//! forwards it to the server as `net_protocol::InputEvent`s - the client
+//! itself never simulates movement or combat, per ADR 0005; it only
+//! reports key state and renders whatever the server broadcasts back. See
+//! `docs/issues/combat-foundation/ground-movement.md` and
+//! `docs/issues/combat-foundation/punch-kick-health-depletion.md`.
 
 use crate::connect_screen::{AppState, ConnectionSlot};
 use bevy::prelude::*;
@@ -14,7 +15,7 @@ impl Plugin for PlayerInputPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            send_movement_input.run_if(in_state(AppState::InMatch)),
+            (send_movement_input, send_attack_input).run_if(in_state(AppState::InMatch)),
         );
     }
 }
@@ -35,5 +36,16 @@ fn send_movement_input(keys: Res<ButtonInput<KeyCode>>, mut slot: NonSendMut<Con
     }
     if keys.just_released(KeyCode::KeyD) {
         slot.send_input(InputEvent::MoveRight(false));
+    }
+}
+
+fn send_attack_input(keys: Res<ButtonInput<KeyCode>>, mut slot: NonSendMut<ConnectionSlot>) {
+    // Attacks are already one-shot events (not a held/released pair like
+    // movement), so just_pressed alone is enough.
+    if keys.just_pressed(KeyCode::KeyJ) {
+        slot.send_input(InputEvent::Punch);
+    }
+    if keys.just_pressed(KeyCode::KeyK) {
+        slot.send_input(InputEvent::Kick);
     }
 }

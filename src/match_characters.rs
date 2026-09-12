@@ -1,7 +1,8 @@
 //! Spawns Player 1 and Player 2's Characters on entering the Match, and
-//! keeps them positioned from the server's state snapshots instead of any
-//! local placeholder. See
-//! `docs/issues/combat-foundation/render-characters-from-server-state.md`.
+//! keeps them positioned - and their Punch/Kick swing animating - from the
+//! server's state snapshots instead of any local placeholder. See
+//! `docs/issues/combat-foundation/render-characters-from-server-state.md`
+//! and `docs/issues/combat-foundation/punch-kick-health-depletion.md`.
 //!
 //! Replaces the M0-era `idle_character` module's hardcoded single-Character
 //! spawn (per that issue's own note that this would happen). Player 2
@@ -9,10 +10,10 @@
 //! milestone moves it server-side yet - there's no special-casing here for
 //! that, it falls out of "position always reflects the server's state".
 
-use crate::character_rig::{self, BodyType, LimbPose};
+use crate::character_rig::{self, BodyType, Limb, LimbPose};
 use crate::connect_screen::{AppState, LatestSnapshot};
 use bevy::prelude::*;
-use combat_ductus::combat::Facing;
+use combat_ductus::combat::{Attack, Facing};
 use combat_ductus::net_protocol::CharacterSnapshot;
 
 /// Scales the rig's native pixel-sized art down to something proportionate
@@ -35,11 +36,20 @@ const POSITION_SCALE: f32 = 100.0;
 /// rendering-side tag for picking the right half of the snapshot to read;
 /// unrelated to (and not a duplicate of) `combat::Player`, which is
 /// server-side simulation state this module never touches directly.
+/// Present on a Character's root *and* its arm/leg children, since the
+/// attack-animation system needs to know whose snapshot to read from a
+/// limb entity, not just the root's.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 enum Slot {
     P1,
     P2,
 }
+
+/// Marks specifically the Character *root* entity, as opposed to its
+/// torso/arm/leg/face children (which also carry `Slot`) - so despawn and
+/// position-update queries don't also try to act on the children directly.
+#[derive(Component)]
+struct CharacterRoot;
 
 pub struct MatchCharactersPlugin;
 
@@ -49,7 +59,8 @@ impl Plugin for MatchCharactersPlugin {
             .add_systems(OnExit(AppState::InMatch), despawn_match_characters)
             .add_systems(
                 Update,
-                update_character_positions.run_if(in_state(AppState::InMatch)),
+                (update_character_positions, update_attack_animations)
+                    .run_if(in_state(AppState::InMatch)),
             );
     }
 }
@@ -76,7 +87,7 @@ fn spawn_match_characters(mut commands: Commands, asset_server: Res<AssetServer>
         let x = default_world_x(slot);
         let y = root_y();
 
-        let entity = character_rig::spawn_character(
+        let entities = character_rig::spawn_character(
             &mut commands,
             &asset_server,
             BodyType::Medium,
@@ -86,34 +97,77 @@ fn spawn_match_characters(mut commands: Commands, asset_server: Res<AssetServer>
             Vec2::new(x, y),
         );
 
-        commands.entity(entity).insert((
+        commands.entity(entities.root).insert((
             slot,
+            CharacterRoot,
             Transform::from_xyz(x, y, 0.0).with_scale(Vec3::splat(CHARACTER_SCALE)),
         ));
+        commands.entity(entities.arm).insert(slot);
+        commands.entity(entities.leg).insert(slot);
     }
 }
 
-fn despawn_match_characters(mut commands: Commands, characters: Query<Entity, With<Slot>>) {
-    for entity in &characters {
+fn despawn_match_characters(mut commands: Commands, roots: Query<Entity, With<CharacterRoot>>) {
+    for entity in &roots {
         commands.entity(entity).despawn();
+    }
+}
+
+fn character_snapshot_for<'a>(
+    snapshot: &'a combat_ductus::net_protocol::StateSnapshot,
+    slot: Slot,
+) -> &'a CharacterSnapshot {
+    match slot {
+        Slot::P1 => &snapshot.p1,
+        Slot::P2 => &snapshot.p2,
     }
 }
 
 fn update_character_positions(
     latest_snapshot: Res<LatestSnapshot>,
-    mut characters: Query<(&Slot, &mut Transform)>,
+    mut characters: Query<(&Slot, &mut Transform), With<CharacterRoot>>,
 ) {
     let Some(snapshot) = &latest_snapshot.0 else {
         return;
     };
 
     for (slot, mut transform) in &mut characters {
-        let character_snapshot: &CharacterSnapshot = match slot {
-            Slot::P1 => &snapshot.p1,
-            Slot::P2 => &snapshot.p2,
-        };
+        let character_snapshot = character_snapshot_for(snapshot, *slot);
         transform.translation.x = character_snapshot.position * POSITION_SCALE;
         transform.translation.y = root_y();
+    }
+}
+
+/// Drives each limb's `LimbPose` from the corresponding Character's
+/// `attacking` field - the arm swings on Punch, the leg swings on Kick,
+/// regardless of whether the attack actually landed (a player should see
+/// their attack attempt even on a whiff). The rest (swapping the sprite
+/// image/Z for the new pose) is `character_rig::update_limb_sprites`'s job,
+/// reacting to `LimbPose` changing - this system only decides what the
+/// pose *should* be.
+fn update_attack_animations(
+    latest_snapshot: Res<LatestSnapshot>,
+    mut limbs: Query<(&Slot, &Limb, &mut LimbPose)>,
+) {
+    let Some(snapshot) = &latest_snapshot.0 else {
+        return;
+    };
+
+    for (slot, limb, mut pose) in &mut limbs {
+        let character_snapshot = character_snapshot_for(snapshot, *slot);
+        let desired = match (character_snapshot.attacking, limb) {
+            (Some(Attack::Punch), Limb::Arm) => LimbPose::Attacking,
+            (Some(Attack::Kick), Limb::Leg) => LimbPose::Attacking,
+            _ => LimbPose::Idle,
+        };
+        // Compare before writing - an unconditional assignment would mark
+        // LimbPose "changed" every frame regardless of whether the value
+        // actually differs, needlessly re-triggering the sprite-swap
+        // system downstream (the same kind of per-frame churn the Health
+        // HUD had before it learned to check first).
+        if *pose != desired {
+            *pose = desired;
+        }
     }
 }
 

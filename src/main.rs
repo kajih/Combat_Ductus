@@ -4,6 +4,7 @@ use bevy::prelude::*;
 mod asset_diagnostics;
 mod character_rig;
 mod connect_screen;
+mod health_hud;
 mod input;
 mod match_characters;
 mod stage;
@@ -11,6 +12,7 @@ mod stage;
 use asset_diagnostics::AssetDiagnosticsPlugin;
 use character_rig::CharacterRigPlugin;
 use connect_screen::ConnectScreenPlugin;
+use health_hud::HealthHudPlugin;
 use input::PlayerInputPlugin;
 use match_characters::MatchCharactersPlugin;
 use stage::StagePlugin;
@@ -35,5 +37,6 @@ fn main() {
         .add_plugins(CharacterRigPlugin)
         .add_plugins(MatchCharactersPlugin)
         .add_plugins(PlayerInputPlugin)
+        .add_plugins(HealthHudPlugin)
         .run();
 }

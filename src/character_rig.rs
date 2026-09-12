@@ -64,8 +64,13 @@ pub enum LimbPose {
 
 /// Marker distinguishing the arm entity from the leg entity, since both
 /// carry a `LimbPose` and need the same "look up my asset + z" system.
+///
+/// `pub(crate)` (not private) so other client-only modules - e.g. the code
+/// driving Punch/Kick's swing from the server's `attacking` field on a
+/// snapshot - can tell which limb entity is which without needing to know
+/// anything else about how the rig is put together.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-enum Limb {
+pub(crate) enum Limb {
     Arm,
     Leg,
 }
@@ -183,6 +188,18 @@ fn limb_z(pose: LimbPose) -> f32 {
 /// face) at `position`, and returns the root entity. The root carries
 /// `BodyType` and `Facing` for later systems (e.g. rendering from server
 /// state) to read back.
+/// The entities a composited Character is made of. Callers that only care
+/// about the Character as a whole (position, despawning) just need `root`;
+/// callers driving Punch/Kick's swing (e.g. from a server snapshot's
+/// `attacking` field) need `arm`/`leg` too, since `LimbPose` lives on those
+/// child entities, not the root.
+pub struct CharacterEntities {
+    pub root: Entity,
+    pub arm: Entity,
+    pub leg: Entity,
+    pub face: Entity,
+}
+
 pub fn spawn_character(
     commands: &mut Commands,
     asset_server: &AssetServer,
@@ -191,7 +208,7 @@ pub fn spawn_character(
     initial_arm_pose: LimbPose,
     initial_leg_pose: LimbPose,
     position: Vec2,
-) -> Entity {
+) -> CharacterEntities {
     let geometry = body_type_geometry(body_type);
     let flip = matches!(facing, Facing::Left);
     let load = |suffix: &str| -> Handle<Image> {
@@ -254,7 +271,7 @@ pub fn spawn_character(
         ))
         .id();
 
-    commands
+    let root = commands
         .spawn((
             body_type,
             CharacterFacing(facing),
@@ -262,7 +279,14 @@ pub fn spawn_character(
             Visibility::default(),
         ))
         .add_children(&[torso, arm, leg, face])
-        .id()
+        .id();
+
+    CharacterEntities {
+        root,
+        arm,
+        leg,
+        face,
+    }
 }
 
 /// Reacts to `LimbPose` changing on an arm/leg entity by swapping its
