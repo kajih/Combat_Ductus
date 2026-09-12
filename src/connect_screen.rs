@@ -183,7 +183,10 @@ fn poll_connection(
                 }
             }
             ConnectionEvent::Snapshot(snapshot) => {
-                info!(tick = snapshot.tick, "received state snapshot");
+                // One of these arrives every server tick (~30/sec) - firehose
+                // territory, not a notable event, so this is trace rather
+                // than info (see docs/issues/observability/logging.md).
+                trace!(tick = snapshot.tick, "received state snapshot");
                 latest_snapshot.0 = Some(snapshot);
             }
             ConnectionEvent::Error(err) => {

@@ -1,10 +1,13 @@
+use bevy::asset::AssetMetaCheck;
 use bevy::prelude::*;
 
+mod asset_diagnostics;
 mod character_rig;
 mod connect_screen;
 mod idle_character;
 mod stage;
 
+use asset_diagnostics::AssetDiagnosticsPlugin;
 use character_rig::CharacterRigPlugin;
 use connect_screen::ConnectScreenPlugin;
 use idle_character::IdleCharacterPlugin;
@@ -12,7 +15,19 @@ use stage::StagePlugin;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins.set(AssetPlugin {
+            // We ship no .meta files at all. Bevy's default (`Always`) probes
+            // for one alongside every asset; on the wasm/Trunk dev server
+            // that probe doesn't get a clean 404 for a missing file (it
+            // appears to get the dev server's SPA-style index.html fallback
+            // instead), which Bevy then fails to parse as asset metadata and
+            // treats as a load failure - so every image silently "failed to
+            // load" despite being served fine. `Never` skips the probe
+            // entirely and just uses default meta, which is all we need.
+            meta_check: AssetMetaCheck::Never,
+            ..default()
+        }))
+        .add_plugins(AssetDiagnosticsPlugin)
         .add_plugins(StagePlugin)
         .add_plugins(ConnectScreenPlugin)
         .add_plugins(CharacterRigPlugin)
