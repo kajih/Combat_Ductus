@@ -628,8 +628,9 @@ mod tests {
             local_addr,
             incoming_rx,
             outgoing_tx,
+            disconnected_rx,
         } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
-        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx));
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
 
         let url = format!("ws://{local_addr}");
         let (mut ws, _) = tokio_tungstenite::connect_async(url)
