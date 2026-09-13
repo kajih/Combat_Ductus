@@ -98,7 +98,11 @@ mod tests {
         let parts = crate::server_net::spawn_network_thread("127.0.0.1:0")
             .expect("server should bind to a free port");
         std::thread::spawn(move || {
-            crate::server_net::run_bevy_app(parts.incoming_rx, parts.outgoing_tx)
+            crate::server_net::run_bevy_app(
+                parts.incoming_rx,
+                parts.outgoing_tx,
+                parts.disconnected_rx,
+            )
         });
 
         let mut connection = Connection::connect(&format!("ws://{}", parts.local_addr))

@@ -25,7 +25,11 @@ fn main() {
     println!("combat_ductus server listening on {}", parts.local_addr);
 
     // Blocks forever, stepping the simulation on a fixed schedule.
-    combat_ductus::server_net::run_bevy_app(parts.incoming_rx, parts.outgoing_tx);
+    combat_ductus::server_net::run_bevy_app(
+        parts.incoming_rx,
+        parts.outgoing_tx,
+        parts.disconnected_rx,
+    );
 }
 
 #[cfg(target_arch = "wasm32")]
