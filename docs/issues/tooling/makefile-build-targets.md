@@ -10,7 +10,7 @@ Concretely, at minimum this should settle:
 - Exact target names (e.g. `dev`, `build`, `server`, `web`, `web-release`, `clean`, `all`) and what the bare `make` (no target) default does
 - Whether `make all` builds every variant in one pass, or that's deliberately left out (a full rebuild of every variant could be slow and isn't necessarily a common workflow)
 - What exactly `clean` removes - `target/` alone, or `target/` and `dist/` (the web build's gitignored output directory) both
-- Whether this is expected to work cross-platform or is scoped to this Windows dev machine, matching the project's existing Windows-specific build tooling (`.cargo/config.toml`'s linker pin). `make` itself isn't installed by default on Windows and would need calling out as a prerequisite, the same way `cargo-binutils`/`llvm-tools-preview` already are in `CLAUDE.md`
+- Cross-platform by default - the primary dev environment for this project is Linux, where `make` is already standard; this machine is Windows only incidentally (WSL's graphics support is unreliable for a Bevy window, so this session runs natively on Windows instead). `make` isn't installed by default on Windows and needs calling out as a one-line prerequisite (e.g. via chocolatey - `choco install make` - already how it's available on this machine), the same way `cargo-binutils`/`llvm-tools-preview` already are in `CLAUDE.md`. Nothing in the Makefile itself should assume Windows - the existing Windows-only build tooling (`.cargo/config.toml`'s linker pin) already degrades gracefully on its own if absent, and this shouldn't need anything analogous
 
 ## Acceptance criteria
 
