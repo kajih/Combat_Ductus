@@ -8,10 +8,10 @@ End-to-end Motivational Speech: pressing H sends a Special input event; the serv
 
 ## Acceptance criteria
 
-- [ ] Pressing H when gating conditions are met deals 1 damage to the opponent regardless of distance or Facing
-- [ ] Pressing H when the opponent is within the minimum cast range, or during cooldown, or during the recent-damage lockout window, has no effect
-- [ ] The speech-bubble VFX displays on a successful cast, showing that Character's specific placeholder text line
-- [ ] Successive casts respect the cooldown (cannot be spammed back-to-back)
+- [x] Pressing H when gating conditions are met deals 1 damage to the opponent regardless of distance or Facing
+- [x] Pressing H when the opponent is within the minimum cast range, or during cooldown, or during the recent-damage lockout window, has no effect
+- [x] The speech-bubble VFX displays on a successful cast, showing that Character's specific placeholder text line
+- [x] Successive casts respect the cooldown (cannot be spammed back-to-back)
 - [ ] Verified by running server + client and exercising a successful cast plus each gating-rejection case
 
 ## Blocked by

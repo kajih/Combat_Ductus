@@ -151,7 +151,7 @@ fn facing_sign(facing: Facing) -> f32 {
 /// separate child entity's Transform. So the face slot's *own* position
 /// has to be mirrored by hand here to track where the (also-flipped) torso
 /// texture's head circle actually ends up.
-fn head_local_offset(body_type: BodyType, facing: Facing) -> Vec2 {
+pub(crate) fn head_local_offset(body_type: BodyType, facing: Facing) -> Vec2 {
     let geometry = body_type_geometry(body_type);
     let canonical_x = geometry.head_center.x - geometry.canvas_size.x / 2.0;
     let y = geometry.canvas_size.y / 2.0 - geometry.head_center.y;

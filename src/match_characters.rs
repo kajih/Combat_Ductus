@@ -1,8 +1,10 @@
 //! Spawns Player 1 and Player 2's Characters on entering the Match, and
-//! keeps them positioned - and their Punch/Kick swing animating - from the
-//! server's state snapshots instead of any local placeholder. See
-//! `docs/issues/combat-foundation/render-characters-from-server-state.md`
-//! and `docs/issues/combat-foundation/punch-kick-health-depletion.md`.
+//! keeps them positioned - and their Punch/Kick swing and Motivational
+//! Speech speech-bubble animating - from the server's state snapshots
+//! instead of any local placeholder. See
+//! `docs/issues/combat-foundation/render-characters-from-server-state.md`,
+//! `docs/issues/combat-foundation/punch-kick-health-depletion.md`, and
+//! `docs/issues/combat-foundation/motivational-speech-special.md`.
 //!
 //! Replaces the M0-era `idle_character` module's hardcoded single-Character
 //! spawn (per that issue's own note that this would happen). Player 2
@@ -51,6 +53,39 @@ enum Slot {
 #[derive(Component)]
 struct CharacterRoot;
 
+/// Marks a Character's speech-bubble text entity (a child of its
+/// `CharacterRoot`, so it automatically follows that Character's position -
+/// including its Jump arc - for free via ordinary transform propagation,
+/// with no extra position-tracking code of its own). Toggled by
+/// `update_speech_bubbles` from that Character's `speaking` flag on the
+/// latest snapshot.
+#[derive(Component)]
+struct SpeechBubble;
+
+/// How far above the (measured) head-circle center - see
+/// `character_rig::head_local_offset` - the speech bubble sits, in the same
+/// unscaled local-pixel space as the rest of the rig, so the bubble clears
+/// the head instead of overlapping it. Picked by eye, like `CHARACTER_SCALE`.
+const SPEECH_BUBBLE_Y_OFFSET_ABOVE_HEAD: f32 = 90.0;
+
+/// Rendered well above every other part of the rig (torso/limbs/face all
+/// sit at Z 0-3 inside `character_rig`) so the bubble is never occluded.
+const Z_SPEECH_BUBBLE: f32 = 10.0;
+
+/// Placeholder Motivational Speech line per player slot. Two distinct,
+/// hardcoded lines are correct for M0/M1, not a shortcut: there's no
+/// character-select screen yet (each slot is one hardcoded Character), and
+/// Motivational Speech's only per-Character variation is its display text
+/// (see CONTEXT.md's `Special`/`Motivational Speech` entries) - marked
+/// placeholder pending real Roster/employee content, the same way the face
+/// photo elsewhere in this rig is a placeholder.
+fn speech_bubble_text(slot: Slot) -> &'static str {
+    match slot {
+        Slot::P1 => "You've got this!",
+        Slot::P2 => "Believe in yourself!",
+    }
+}
+
 pub struct MatchCharactersPlugin;
 
 impl Plugin for MatchCharactersPlugin {
@@ -59,7 +94,11 @@ impl Plugin for MatchCharactersPlugin {
             .add_systems(OnExit(AppState::InMatch), despawn_match_characters)
             .add_systems(
                 Update,
-                (update_character_positions, update_attack_animations)
+                (
+                    update_character_positions,
+                    update_attack_animations,
+                    update_speech_bubbles,
+                )
                     .run_if(in_state(AppState::InMatch)),
             );
     }
@@ -104,6 +143,30 @@ fn spawn_match_characters(mut commands: Commands, asset_server: Res<AssetServer>
         ));
         commands.entity(entities.arm).insert(slot);
         commands.entity(entities.leg).insert(slot);
+
+        // Child of the root, in the same unscaled local-pixel space as the
+        // torso/arm/leg/face - it inherits the root's position (and scale)
+        // automatically, so it follows the Character (including its Jump
+        // arc) with no extra tracking code needed here.
+        let head_offset = character_rig::head_local_offset(BodyType::Medium, facing);
+        commands.entity(entities.root).with_children(|parent| {
+            parent.spawn((
+                SpeechBubble,
+                slot,
+                Visibility::Hidden,
+                Transform::from_xyz(
+                    head_offset.x,
+                    head_offset.y + SPEECH_BUBBLE_Y_OFFSET_ABOVE_HEAD,
+                    Z_SPEECH_BUBBLE,
+                ),
+                Text2d::new(speech_bubble_text(slot)),
+                TextFont {
+                    font_size: bevy::text::FontSize::Px(40.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
     }
 }
 
@@ -167,6 +230,35 @@ fn update_attack_animations(
         // HUD had before it learned to check first).
         if *pose != desired {
             *pose = desired;
+        }
+    }
+}
+
+/// Shows/hides each Character's speech bubble from that Character's
+/// `speaking` flag on the latest snapshot - only ever true after a
+/// *successful* Motivational Speech cast (a rejected/gated attempt has no
+/// feedback at all, matching Punch/Kick's whiff-vs-no-whiff distinction for
+/// Special - see `combat::CharacterState::speaking`'s doc comment).
+fn update_speech_bubbles(
+    latest_snapshot: Res<LatestSnapshot>,
+    mut bubbles: Query<(&Slot, &mut Visibility), With<SpeechBubble>>,
+) {
+    let Some(snapshot) = &latest_snapshot.0 else {
+        return;
+    };
+
+    for (slot, mut visibility) in &mut bubbles {
+        let character_snapshot = character_snapshot_for(snapshot, *slot);
+        let desired = if character_snapshot.speaking {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        // Compare before writing, same reasoning as update_attack_animations
+        // above - avoid marking Visibility "changed" every frame regardless
+        // of whether it actually differs.
+        if *visibility != desired {
+            *visibility = desired;
         }
     }
 }

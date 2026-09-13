@@ -277,6 +277,7 @@ fn character_snapshot(character: &crate::combat::CharacterState) -> CharacterSna
         health: character.health,
         airborne: character.airborne,
         vertical_offset: character.vertical_offset,
+        speaking: character.speaking,
         attacking: character.attack_animation,
     }
 }
@@ -285,7 +286,7 @@ fn character_snapshot(character: &crate::combat::CharacterState) -> CharacterSna
 mod tests {
     use super::*;
     use crate::combat::{
-        ATTACK_RANGE, KICK_DAMAGE, PUNCH_DAMAGE, STAGE_HALF_WIDTH, STARTING_HEALTH,
+        ATTACK_RANGE, KICK_DAMAGE, PUNCH_DAMAGE, SPECIAL_DAMAGE, STAGE_HALF_WIDTH, STARTING_HEALTH,
     };
     use crate::net_protocol::{InputEvent, MatchStatus};
     use std::time::Duration as StdDuration;
@@ -619,6 +620,51 @@ mod tests {
         .await
         .expect("timed out waiting for the jump to end");
         assert_eq!(landed.p1.vertical_offset, 0.0);
+    }
+
+    #[tokio::test]
+    async fn special_input_lands_shows_the_speech_bubble_then_it_clears() {
+        let ServerParts {
+            local_addr,
+            incoming_rx,
+            outgoing_tx,
+        } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx));
+
+        let url = format!("ws://{local_addr}");
+        let (mut ws, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("client should be able to connect");
+
+        // Starting positions (see MatchState::new) are already farther
+        // apart than SPECIAL_MIN_RANGE, so Special can be cast right away
+        // with no movement needed.
+        send_event(&mut ws, InputEvent::Special).await;
+
+        let cast = tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                let snapshot = read_snapshot(&mut ws).await;
+                if snapshot.p2.health < STARTING_HEALTH {
+                    return snapshot;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the special to land");
+        assert_eq!(cast.p2.health, STARTING_HEALTH - SPECIAL_DAMAGE);
+        assert!(cast.p1.speaking);
+
+        let cleared = tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                let snapshot = read_snapshot(&mut ws).await;
+                if !snapshot.p1.speaking {
+                    return snapshot;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the speech bubble to clear");
+        assert!(!cleared.p1.speaking);
     }
 
     #[tokio::test]
