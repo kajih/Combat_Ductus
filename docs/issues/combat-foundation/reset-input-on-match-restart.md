@@ -1,6 +1,6 @@
 ## Parent
 
-docs/prd/combat-foundation-m0-m1.md
+docs/prd/combat-foundation-hardening.md
 
 ## What to build
 
