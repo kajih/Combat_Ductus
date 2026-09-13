@@ -22,7 +22,7 @@ That's everything required. Two more things are optional, Windows-only build-spe
 
 ## Building and running
 
-The crate has **two binaries**: the client (`combat_ductus`, the default) and the headless server (`server`). You need both running to actually play.
+The crate has **two binaries**: the client (`combat-ductus`, the default) and the headless server (`server`). You need both running to actually play.
 
 ### The server
 
