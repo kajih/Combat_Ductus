@@ -89,6 +89,15 @@ pub const STAGE_HALF_WIDTH: f32 = 6.0;
 /// Placeholder tuning value; ~1/3 second at the server's ~30Hz tick rate.
 pub const ATTACK_ANIMATION_TICKS: u8 = 10;
 
+/// How long a Jump's full rise-and-fall arc lasts, in ticks, from the
+/// instant it's triggered to landing again. Placeholder tuning value; ~0.8
+/// second at the server's ~30Hz tick rate.
+pub const JUMP_DURATION_TICKS: u8 = 24;
+/// The peak height a Jump reaches, in the same abstract game-position units
+/// as `CharacterState::position` (not pixels — rendering scales this up).
+/// Placeholder tuning value.
+pub const JUMP_HEIGHT: f32 = 0.8;
+
 /// One Character's simulated state within a Match.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CharacterState {
@@ -96,6 +105,13 @@ pub struct CharacterState {
     pub facing: Facing,
     pub health: u8,
     pub airborne: bool,
+    /// How high off the ground a Character currently is, in the same
+    /// abstract game-position units as `position`. Zero whenever `airborne`
+    /// is false; driven by `tick_jump` through a simple rise-and-fall arc
+    /// while it's true. Rendering-only - no combat rule depends on the
+    /// actual height, only on `airborne` itself.
+    pub vertical_offset: f32,
+    jump_ticks_remaining: u8,
     /// The tick Special was last successfully cast, if ever. Cooldown is
     /// measured from this.
     pub special_last_cast_tick: Option<u64>,
@@ -116,6 +132,8 @@ impl CharacterState {
             facing,
             health: STARTING_HEALTH,
             airborne: false,
+            vertical_offset: 0.0,
+            jump_ticks_remaining: 0,
             special_last_cast_tick: None,
             last_hit_tick: None,
             attack_animation: None,
@@ -135,6 +153,33 @@ impl CharacterState {
                 self.attack_animation = None;
             }
         }
+    }
+
+    fn start_jump(&mut self) {
+        self.airborne = true;
+        self.jump_ticks_remaining = JUMP_DURATION_TICKS;
+    }
+
+    /// Advances the jump arc by one tick, if one is in progress. Uses a
+    /// simple parabola (zero at takeoff and landing, `JUMP_HEIGHT` at the
+    /// midpoint) rather than any real gravity simulation - Jump is purely a
+    /// repositioning tool, not a physics feature.
+    fn tick_jump(&mut self) {
+        if self.jump_ticks_remaining == 0 {
+            return;
+        }
+
+        self.jump_ticks_remaining -= 1;
+
+        if self.jump_ticks_remaining == 0 {
+            self.airborne = false;
+            self.vertical_offset = 0.0;
+            return;
+        }
+
+        let elapsed = JUMP_DURATION_TICKS - self.jump_ticks_remaining;
+        let progress = elapsed as f32 / JUMP_DURATION_TICKS as f32;
+        self.vertical_offset = JUMP_HEIGHT * 4.0 * progress * (1.0 - progress);
     }
 }
 
@@ -186,6 +231,8 @@ impl MatchState {
         self.tick += 1;
         self.p1.tick_attack_animation();
         self.p2.tick_attack_animation();
+        self.p1.tick_jump();
+        self.p2.tick_jump();
     }
 
     /// Move `player` by `delta` world units (positive = toward the
@@ -201,6 +248,23 @@ impl MatchState {
         let character = self.character_mut(player);
         character.position =
             (character.position + delta).clamp(-STAGE_HALF_WIDTH, STAGE_HALF_WIDTH);
+    }
+
+    /// Sends `player` airborne on a Jump arc (Space) — purely vertical
+    /// repositioning, driven entirely by `tick_jump` from here on. A no-op
+    /// once the Match has ended, or if the Character is already airborne
+    /// (no double-jump).
+    pub fn jump(&mut self, player: Player) {
+        if self.has_ended() {
+            return;
+        }
+
+        let character = self.character_mut(player);
+        if character.airborne {
+            return;
+        }
+
+        character.start_jump();
     }
 
     /// Attempt `attack` by `attacker` against their opponent at the current
@@ -586,6 +650,96 @@ mod tests {
 
         m.advance_tick();
         assert_eq!(m.p1.attack_animation, None);
+    }
+
+    #[test]
+    fn jump_sends_a_character_airborne_and_they_land_again() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+
+        m.jump(Player::P1);
+        assert!(m.p1.airborne);
+        assert_eq!(m.p1.vertical_offset, 0.0);
+
+        for _ in 0..JUMP_DURATION_TICKS - 1 {
+            m.advance_tick();
+            assert!(m.p1.airborne);
+            assert!(m.p1.vertical_offset > 0.0);
+        }
+
+        m.advance_tick();
+        assert!(!m.p1.airborne);
+        assert_eq!(m.p1.vertical_offset, 0.0);
+    }
+
+    #[test]
+    fn jump_arc_peaks_at_the_midpoint_and_is_symmetric() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+        m.jump(Player::P1);
+
+        let half = JUMP_DURATION_TICKS / 2;
+        for _ in 0..half {
+            m.advance_tick();
+        }
+        let midpoint_height = m.p1.vertical_offset;
+        assert!((midpoint_height - JUMP_HEIGHT).abs() < 0.01);
+
+        // One tick before takeoff and one tick before landing should read
+        // the same height - the arc is symmetric, not a sawtooth.
+        let mut early = MatchState::new();
+        early.p1 = state_at(0.0, Facing::Right);
+        early.jump(Player::P1);
+        early.advance_tick();
+        let mut late = MatchState::new();
+        late.p1 = state_at(0.0, Facing::Right);
+        late.jump(Player::P1);
+        for _ in 0..JUMP_DURATION_TICKS - 1 {
+            late.advance_tick();
+        }
+        assert!((early.p1.vertical_offset - late.p1.vertical_offset).abs() < 0.01);
+    }
+
+    #[test]
+    fn jump_does_not_change_horizontal_position() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(1.0, Facing::Right);
+
+        m.jump(Player::P1);
+        for _ in 0..JUMP_DURATION_TICKS {
+            m.advance_tick();
+        }
+
+        assert_eq!(m.p1.position, 1.0);
+    }
+
+    #[test]
+    fn jumping_again_while_already_airborne_is_a_no_op() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+
+        m.jump(Player::P1);
+        m.advance_tick();
+        let mid_arc_remaining_offset = m.p1.vertical_offset;
+
+        // A second Jump input mid-arc shouldn't restart the arc's duration.
+        m.jump(Player::P1);
+        m.advance_tick();
+        assert!(m.p1.vertical_offset != mid_arc_remaining_offset);
+        for _ in 0..JUMP_DURATION_TICKS - 2 {
+            m.advance_tick();
+        }
+        assert!(!m.p1.airborne);
+    }
+
+    #[test]
+    fn jump_does_nothing_after_the_match_has_ended() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+        m.winner = Some(Player::P2);
+
+        m.jump(Player::P1);
+        assert!(!m.p1.airborne);
     }
 
     #[test]

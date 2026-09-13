@@ -15,7 +15,8 @@ impl Plugin for PlayerInputPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (send_movement_input, send_attack_input).run_if(in_state(AppState::InMatch)),
+            (send_movement_input, send_jump_input, send_attack_input)
+                .run_if(in_state(AppState::InMatch)),
         );
     }
 }
@@ -36,6 +37,14 @@ fn send_movement_input(keys: Res<ButtonInput<KeyCode>>, mut slot: NonSendMut<Con
     }
     if keys.just_released(KeyCode::KeyD) {
         slot.send_input(InputEvent::MoveRight(false));
+    }
+}
+
+fn send_jump_input(keys: Res<ButtonInput<KeyCode>>, mut slot: NonSendMut<ConnectionSlot>) {
+    // One-shot like an attack, not a held/released pair like movement - the
+    // server drives the whole rise-and-fall arc itself once triggered.
+    if keys.just_pressed(KeyCode::Space) {
+        slot.send_input(InputEvent::Jump);
     }
 }
 

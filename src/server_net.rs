@@ -179,9 +179,7 @@ fn step_simulation(
         match event {
             InputEvent::MoveLeft(pressed) => held.p1_left = pressed,
             InputEvent::MoveRight(pressed) => held.p1_right = pressed,
-            // Jump's actual airborne arc is a later issue; the skeleton just
-            // proves an attack/movement input can reach the simulation.
-            InputEvent::Jump => {}
+            InputEvent::Jump => match_state.0.jump(Player::P1),
             InputEvent::RequestRestart => {
                 // Only honored once the Match has actually ended - this
                 // resets a concluded Match, not an active one.
@@ -234,6 +232,7 @@ fn character_snapshot(character: &crate::combat::CharacterState) -> CharacterSna
         facing: character.facing,
         health: character.health,
         airborne: character.airborne,
+        vertical_offset: character.vertical_offset,
         attacking: character.attack_animation,
     }
 }
@@ -413,6 +412,47 @@ mod tests {
             let snapshot = read_snapshot(&mut ws).await;
             assert_eq!(snapshot.p1.position, settled);
         }
+    }
+
+    #[tokio::test]
+    async fn jump_input_sends_player_one_airborne_and_they_land_again() {
+        let ServerParts {
+            local_addr,
+            incoming_rx,
+            outgoing_tx,
+        } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx));
+
+        let url = format!("ws://{local_addr}");
+        let (mut ws, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("client should be able to connect");
+
+        send_event(&mut ws, InputEvent::Jump).await;
+
+        let airborne = tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                let snapshot = read_snapshot(&mut ws).await;
+                if snapshot.p1.airborne {
+                    return snapshot;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the jump to start");
+        assert!(airborne.p1.vertical_offset > 0.0);
+
+        let landed = tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                let snapshot = read_snapshot(&mut ws).await;
+                if !snapshot.p1.airborne {
+                    return snapshot;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the jump to end");
+        assert_eq!(landed.p1.vertical_offset, 0.0);
     }
 
     #[tokio::test]

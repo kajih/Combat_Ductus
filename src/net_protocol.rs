@@ -57,6 +57,10 @@ pub struct CharacterSnapshot {
     pub facing: Facing,
     pub health: u8,
     pub airborne: bool,
+    /// How high off the ground this Character currently is, in the same
+    /// abstract game-position units as `position`. Zero whenever `airborne`
+    /// is false. Rendering-only.
+    pub vertical_offset: f32,
     /// Which attack's arm/leg swing is currently animating, if any - only
     /// ever `Punch` or `Kick` (Special's feedback is a separate VFX, not a
     /// limb swing). Set the instant the attack is thrown, regardless of
@@ -120,6 +124,7 @@ mod tests {
                 facing: Facing::Right,
                 health: 3,
                 airborne: false,
+                vertical_offset: 0.0,
                 attacking: Some(Attack::Punch),
             },
             p2: CharacterSnapshot {
@@ -127,6 +132,7 @@ mod tests {
                 facing: Facing::Left,
                 health: 5,
                 airborne: true,
+                vertical_offset: 0.6,
                 attacking: None,
             },
             status: MatchStatus::InProgress,

@@ -134,7 +134,7 @@ fn update_character_positions(
     for (slot, mut transform) in &mut characters {
         let character_snapshot = character_snapshot_for(snapshot, *slot);
         transform.translation.x = character_snapshot.position * POSITION_SCALE;
-        transform.translation.y = root_y();
+        transform.translation.y = root_y() + character_snapshot.vertical_offset * POSITION_SCALE;
     }
 }
 
