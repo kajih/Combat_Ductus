@@ -44,7 +44,7 @@ Vertical repositioning available to either Character. Purely movement — a Char
 Each Character has a facing direction fixed for the whole Match — Player 1 always faces right, Player 2 always faces left — regardless of either Character's position. Characters never turn. There is no block or dedicated dodge mechanic; avoiding an attack is purely a matter of moving out of its range.
 
 **Match**:
-A single, unrepeated contest between two Characters, decided the moment one Character's Health reaches 0. Not divided into rounds. In v1, a Match's end is terminal — a winner is declared and there is no rematch/restart flow.
+A single, unrepeated contest between two Characters, decided the moment one Character's Health reaches 0. Not divided into rounds. A Match's end is terminal in itself — no rounds, no mid-Match reset of Health/position — but an explicit restart control on the Match-Ended screen can begin a brand new Match afterward; nothing auto-repeats or resumes on its own. A connection joining or reconnecting mid-Match inherits whatever state is already there rather than getting a fresh start. See [0009](docs/adr/0009-reconnecting-inherits-current-match-state.md).
 _Avoid_: Round, game (when "Match" is meant)
 
 **Stage**:

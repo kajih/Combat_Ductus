@@ -15,9 +15,9 @@ Concretely, at minimum this should settle:
 
 ## Acceptance criteria
 
-- [ ] A documented, deliberate rule exists for what a new/returning connection sees and controls when joining a Match already in progress
-- [ ] A documented, deliberate rule exists for what happens when a new/returning connection joins after a Match has already ended
-- [ ] The server's actual behavior matches whichever rule is chosen, rather than the current unspecified/accidental behavior
+- [x] A documented, deliberate rule exists for what a new/returning connection sees and controls when joining a Match already in progress
+- [x] A documented, deliberate rule exists for what happens when a new/returning connection joins after a Match has already ended
+- [x] The server's actual behavior matches whichever rule is chosen, rather than the current unspecified/accidental behavior
 - [ ] Verified by connecting a client mid-Match and again after a Match has ended, and confirming the behavior matches the documented rule
 
 ## Blocked by
