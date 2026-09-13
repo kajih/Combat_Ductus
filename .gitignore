@@ -6,6 +6,3 @@
 # IDE
 .idea/
 .vscode/
-
-# runtime save data (regenerated on first run)
-highscore.txt
