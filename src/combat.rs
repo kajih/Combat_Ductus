@@ -63,6 +63,17 @@ pub const KICK_DAMAGE: u8 = 2;
 /// for M0/M1; this is a simple 1D distance check.
 pub const ATTACK_RANGE: f32 = 1.5;
 
+/// Ticks between successive Kicks, measured from either Character's last
+/// Punch *or* Kick (a shared cooldown clock, not a per-attack one - see
+/// `CharacterState::last_attack_tick`). Placeholder tuning value; kept
+/// longer than `ATTACK_ANIMATION_TICKS` so a Kick's own swing always
+/// finishes well before it's usable again.
+pub const KICK_COOLDOWN_TICKS: u64 = 16;
+/// Ticks between successive Punches, measured the same way. Punch has a
+/// shorter, steadier cadence than Kick - half of Kick's cooldown, not a
+/// separate "two free punches" allowance.
+pub const PUNCH_COOLDOWN_TICKS: u64 = KICK_COOLDOWN_TICKS / 2;
+
 pub const SPECIAL_DAMAGE: u8 = 1;
 /// Motivational Speech can only be cast when the opponent is farther away
 /// than this floor (ADR 0008) — the opposite of a normal attack's range.
@@ -128,6 +139,12 @@ pub struct CharacterState {
     /// The tick Special was last successfully cast, if ever. Cooldown is
     /// measured from this.
     pub special_last_cast_tick: Option<u64>,
+    /// The tick this Character last threw a Punch *or* Kick, if ever - one
+    /// shared timestamp for both, updated by whichever was thrown most
+    /// recently (regardless of whether it landed). Punch/Kick cooldown is
+    /// measured from this (see `KICK_COOLDOWN_TICKS`/`PUNCH_COOLDOWN_TICKS`
+    /// and `attack_cooldown_elapsed`).
+    pub last_attack_tick: Option<u64>,
     /// The tick this Character was last hit, if ever. The Special
     /// recent-damage lockout is measured from this.
     pub last_hit_tick: Option<u64>,
@@ -150,6 +167,7 @@ impl CharacterState {
             speaking: false,
             speech_bubble_ticks_remaining: 0,
             special_last_cast_tick: None,
+            last_attack_tick: None,
             last_hit_tick: None,
             attack_animation: None,
             attack_animation_ticks_remaining: 0,
@@ -313,6 +331,16 @@ impl MatchState {
         let tick = self.tick;
         let defender = attacker.opponent();
 
+        // A cooldown-gated Punch/Kick is silently dropped - no animation,
+        // no damage, no feedback of any kind (unlike an out-of-range whiff,
+        // which still plays the swing). Checked before anything else so a
+        // gated attempt never touches `last_attack_tick` or the animation.
+        if matches!(attack, Attack::Punch | Attack::Kick)
+            && !attack_cooldown_elapsed(self.character(attacker), attack, tick)
+        {
+            return false;
+        }
+
         let landed = match attack {
             Attack::Punch | Attack::Kick => {
                 let a = self.character(attacker);
@@ -329,9 +357,13 @@ impl MatchState {
         // Punch/Kick's visible swing plays regardless of whether the
         // attack lands - a player should see their attack attempt even on
         // a whiff. Special has no limb swing (separate VFX, separate
-        // issue).
+        // issue). Either attack also updates the shared cooldown clock
+        // here, on landing or whiffing alike - a thrown attack still has
+        // recovery, even one that misses.
         if matches!(attack, Attack::Punch | Attack::Kick) {
-            self.character_mut(attacker).start_attack_animation(attack);
+            let attacker_state = self.character_mut(attacker);
+            attacker_state.start_attack_animation(attack);
+            attacker_state.last_attack_tick = Some(tick);
         }
 
         if !landed {
@@ -382,6 +414,23 @@ fn in_attack_range(attacker: &CharacterState, defender: &CharacterState) -> bool
     let facing_matches = offset * attacker.facing.sign() >= 0.0;
 
     distance <= ATTACK_RANGE && facing_matches
+}
+
+/// Whether enough ticks have passed since `attacker`'s last Punch *or* Kick
+/// for a new `attack` (Punch or Kick) to be thrown. Kick requires the full
+/// `KICK_COOLDOWN_TICKS`; Punch only half that - either attack gates the
+/// other, since both read from the same shared `last_attack_tick`.
+fn attack_cooldown_elapsed(attacker: &CharacterState, attack: Attack, tick: u64) -> bool {
+    let threshold = match attack {
+        Attack::Punch => PUNCH_COOLDOWN_TICKS,
+        Attack::Kick => KICK_COOLDOWN_TICKS,
+        Attack::Special => return true, // Special has its own, separate cooldown.
+    };
+
+    match attacker.last_attack_tick {
+        Some(last) => tick.saturating_sub(last) >= threshold,
+        None => true,
+    }
 }
 
 /// Motivational Speech ignores range/Facing once cast (ADR 0008), so it
@@ -629,6 +678,8 @@ mod tests {
         assert_eq!(m.p2.health, 1);
         assert!(!m.has_ended());
 
+        // A second Punch has to wait out the cooldown from the first.
+        m.tick += PUNCH_COOLDOWN_TICKS;
         assert!(m.apply_attack(Player::P1, Attack::Punch));
         assert_eq!(m.p2.health, 0);
         assert!(m.has_ended());
@@ -819,14 +870,116 @@ mod tests {
         m.p1 = state_at(0.0, Facing::Right);
         m.p2 = state_at(1.0, Facing::Left);
 
-        m.apply_attack(Player::P1, Attack::Punch);
+        // A Kick first, so the second attack (a Punch, needing only half
+        // Kick's cooldown) is already off cooldown by the time it's thrown
+        // below - it's the animation restart being tested here, not the
+        // cooldown gate.
+        m.apply_attack(Player::P1, Attack::Kick);
         for _ in 0..ATTACK_ANIMATION_TICKS - 1 {
             m.advance_tick();
         }
         // One tick from clearing - a fresh attack now should restart the
         // full duration rather than clearing on the next tick anyway.
-        m.apply_attack(Player::P1, Attack::Kick);
+        assert!(m.apply_attack(Player::P1, Attack::Punch));
         m.advance_tick();
-        assert_eq!(m.p1.attack_animation, Some(Attack::Kick));
+        assert_eq!(m.p1.attack_animation, Some(Attack::Punch));
+    }
+
+    #[test]
+    fn kick_requires_a_full_cooldown_since_the_last_punch_or_kick() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+        m.p2 = state_at(1.0, Facing::Left);
+
+        assert!(m.apply_attack(Player::P1, Attack::Punch));
+
+        // Barely any time has passed - Kick is gated.
+        assert!(!m.apply_attack(Player::P1, Attack::Kick));
+
+        // Exactly at Kick's full-cooldown boundary since the Punch - still
+        // not ready.
+        m.tick += KICK_COOLDOWN_TICKS - 1;
+        assert!(!m.apply_attack(Player::P1, Attack::Kick));
+
+        // One tick further - Kick's cooldown has elapsed.
+        m.tick += 1;
+        assert!(m.apply_attack(Player::P1, Attack::Kick));
+    }
+
+    #[test]
+    fn punch_requires_only_half_the_kick_cooldown_since_the_last_punch_or_kick() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+        m.p2 = state_at(1.0, Facing::Left);
+
+        assert!(m.apply_attack(Player::P1, Attack::Punch));
+
+        assert!(!m.apply_attack(Player::P1, Attack::Punch));
+
+        m.tick += PUNCH_COOLDOWN_TICKS - 1;
+        assert!(!m.apply_attack(Player::P1, Attack::Punch));
+
+        m.tick += 1;
+        assert!(m.apply_attack(Player::P1, Attack::Punch));
+    }
+
+    #[test]
+    fn a_kick_delays_the_next_punch_by_half_the_kick_cooldown() {
+        // Either attack gates the other, per punch-kick-cooldown.md - a
+        // Kick blocks a following Punch too, not just a following Kick.
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+        m.p2 = state_at(1.0, Facing::Left);
+
+        assert!(m.apply_attack(Player::P1, Attack::Kick));
+
+        assert!(!m.apply_attack(Player::P1, Attack::Punch));
+
+        m.tick += PUNCH_COOLDOWN_TICKS - 1;
+        assert!(!m.apply_attack(Player::P1, Attack::Punch));
+
+        m.tick += 1;
+        assert!(m.apply_attack(Player::P1, Attack::Punch));
+    }
+
+    #[test]
+    fn cooldown_gated_attack_starts_no_animation_and_deals_no_damage() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+        m.p2 = state_at(1.0, Facing::Left);
+
+        assert!(m.apply_attack(Player::P1, Attack::Punch));
+        for _ in 0..ATTACK_ANIMATION_TICKS {
+            m.advance_tick();
+        }
+        // The Punch's own swing has already cleared, well before Kick's
+        // full cooldown has - a Kick thrown now should be a total no-op,
+        // not even a whiff animation.
+        assert!(m.p1.attack_animation.is_none());
+
+        let health_before = m.p2.health;
+        assert!(!m.apply_attack(Player::P1, Attack::Kick));
+        assert!(m.p1.attack_animation.is_none());
+        assert_eq!(m.p2.health, health_before);
+    }
+
+    #[test]
+    fn attack_cooldown_resets_on_a_fresh_match_state() {
+        // Mirrors how a Match restart works in practice
+        // (`InputEvent::RequestRestart` replaces the whole `MatchState`) -
+        // confirmed here directly against `CharacterState`, with no extra
+        // reset code involved.
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+        m.p2 = state_at(1.0, Facing::Left);
+
+        assert!(m.apply_attack(Player::P1, Attack::Kick));
+        assert!(!m.apply_attack(Player::P1, Attack::Punch));
+
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+        m.p2 = state_at(1.0, Facing::Left);
+
+        assert!(m.apply_attack(Player::P1, Attack::Punch));
     }
 }
