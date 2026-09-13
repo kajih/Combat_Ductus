@@ -1181,6 +1181,124 @@ mod tests {
         assert_eq!(restarted.p2.health, STARTING_HEALTH);
     }
 
+    #[tokio::test]
+    async fn a_connection_joining_after_the_match_has_ended_sees_ended_status_immediately() {
+        // See docs/adr/0009-reconnecting-inherits-current-match-state.md -
+        // a late connection gets the truthful current status right away,
+        // not a stale InProgress snapshot first.
+        let ServerParts {
+            local_addr,
+            incoming_rx,
+            outgoing_tx,
+            disconnected_rx,
+        } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
+
+        let url = format!("ws://{local_addr}");
+        let (mut p1, _) = tokio_tungstenite::connect_async(url.clone())
+            .await
+            .expect("first client should be able to connect");
+
+        move_p1_into_attack_range_of_p2(&mut p1).await;
+        for _ in 0..STARTING_HEALTH {
+            send_event(&mut p1, InputEvent::Punch).await;
+        }
+        tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                if matches!(
+                    read_snapshot(&mut p1).await.status,
+                    MatchStatus::Ended { .. }
+                ) {
+                    return;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the match to end");
+
+        // Connect fresh, after the match is already over - its very first
+        // snapshot should already report Ended, not InProgress.
+        let (mut latecomer, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("late client should be able to connect");
+        let first_snapshot = read_snapshot(&mut latecomer).await;
+        assert!(matches!(first_snapshot.status, MatchStatus::Ended { .. }));
+    }
+
+    #[tokio::test]
+    async fn a_connection_taking_over_a_vacated_slot_inherits_its_current_state_not_a_fresh_start()
+    {
+        // See docs/adr/0009-reconnecting-inherits-current-match-state.md -
+        // no reset-on-reconnect, or a losing player could escape a bad
+        // position just by disconnecting and reconnecting.
+        let ServerParts {
+            local_addr,
+            incoming_rx,
+            outgoing_tx,
+            disconnected_rx,
+        } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
+
+        let url = format!("ws://{local_addr}");
+        let (mut p1, _) = tokio_tungstenite::connect_async(url.clone())
+            .await
+            .expect("first client should be able to connect");
+        let (p2, _) = tokio_tungstenite::connect_async(url.clone())
+            .await
+            .expect("second client should be able to connect");
+
+        // Land one Punch on P2 (not a killing blow - the Match must still
+        // be in progress afterward), then P2 disconnects.
+        move_p1_into_attack_range_of_p2(&mut p1).await;
+        send_event(&mut p1, InputEvent::Punch).await;
+        let damaged = tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                let snapshot = read_snapshot(&mut p1).await;
+                if snapshot.p2.health < STARTING_HEALTH {
+                    return snapshot;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the punch to land");
+        assert_eq!(damaged.p2.health, STARTING_HEALTH - PUNCH_DAMAGE);
+
+        drop(p2);
+
+        // A fresh connection claims the now-free P2 slot - confirmed by
+        // actually being able to move P2 (proving it's really controlling
+        // that slot, not just observing the global broadcast, which any
+        // spectator would also see). Retry (as in
+        // a_freed_player_slot_is_reassigned_to_the_next_connection) since
+        // the slot may not have freed up by the very first attempt.
+        let inherited_health = tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                let Ok((mut ws, _)) = tokio_tungstenite::connect_async(url.clone()).await else {
+                    continue;
+                };
+                let health_on_arrival = read_snapshot(&mut ws).await.p2.health;
+                send_event(&mut ws, InputEvent::MoveLeft(true)).await;
+                let controls_p2 = tokio::time::timeout(StdDuration::from_millis(500), async {
+                    loop {
+                        let snapshot = read_snapshot(&mut ws).await;
+                        if snapshot.p2.position < damaged.p2.position {
+                            return;
+                        }
+                    }
+                })
+                .await
+                .is_ok();
+                if controls_p2 {
+                    return health_on_arrival;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for a new connection to control the vacated P2 slot");
+
+        assert_eq!(inherited_health, STARTING_HEALTH - PUNCH_DAMAGE);
+    }
+
     async fn send_event(
         ws: &mut tokio_tungstenite::WebSocketStream<
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
