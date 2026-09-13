@@ -64,6 +64,22 @@ cargo clippy      # lint
 cargo fmt         # format
 ```
 
+## Makefile
+
+A root `Makefile` wraps the commands above as `make` targets, for anyone with `make` on their machine (Linux/macOS have it by default; on Windows, install it separately, e.g. `choco install make`). It's purely a convenience layer — every plain cargo/trunk command above still works and is the only option without `make`.
+
+Run `make` with no target (or `make help`) to list what's available:
+
+```
+make dev          # cargo run --features dev
+make build        # cargo build (both the client and server binaries)
+make server       # cargo run --bin server
+make web          # trunk serve
+make web-release  # trunk build --release
+make all          # every non-running build artifact: build + web-release
+make clean        # remove target/ and dist/, for a genuinely from-scratch build
+```
+
 ## Learn more
 
 - [`CONTEXT.md`](CONTEXT.md) — the project's domain glossary (Character, Match, Facing, Special, etc.)

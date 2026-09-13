@@ -48,6 +48,10 @@ Update this section again once the architecture changes meaningfully (a new mile
 
 Note: this project uses Rust edition 2024 and Bevy 0.19.1 — when adding code, match APIs to that Bevy version (Bevy's API changes significantly between minor versions).
 
+### Makefile
+
+A root `Makefile` wraps the commands above (and the web-build ones below) as `make` targets — run `make` (or `make help`) with no target for the full list (`dev`, `build`, `server`, `web`, `web-release`, `all`, `clean`). This is purely a convenience layer: the plain cargo/trunk commands documented throughout this file remain valid and are the only option on a machine without `make`. `make` isn't installed by default on Windows — this machine has it via `choco install make`; the Makefile itself doesn't assume Windows in any other way.
+
 ## Web (WASM) build
 
 - **Run in browser (dev, fast iteration): `trunk serve`** — builds for `wasm32-unknown-unknown`, serves on `http://localhost:8080` and opens a browser tab, and rebuilds on file changes.
