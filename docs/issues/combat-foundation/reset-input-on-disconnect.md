@@ -8,9 +8,9 @@ When a client's WebSocket connection is dropped - closed, errored, or otherwise 
 
 ## Acceptance criteria
 
-- [ ] Disconnecting a client while a movement key was held stops that Character from continuing to move on the very next server tick after the disconnect is detected
-- [ ] This holds regardless of which direction was held, and even for an abrupt disconnect (network drop, killed process), not just a clean close
-- [ ] Verified by connecting, holding a movement key, forcibly disconnecting (e.g. killing the client process), and confirming the Character stops moving rather than continuing indefinitely
+- [x] Disconnecting a client while a movement key was held stops that Character from continuing to move on the very next server tick after the disconnect is detected
+- [x] This holds regardless of which direction was held, and even for an abrupt disconnect (network drop, killed process), not just a clean close
+- [x] Verified by connecting, holding a movement key, forcibly disconnecting (e.g. killing the client process), and confirming the Character stops moving rather than continuing indefinitely
 
 ## Blocked by
 

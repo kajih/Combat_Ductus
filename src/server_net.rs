@@ -13,12 +13,16 @@
 //! - a headless Bevy `App` (`MinimalPlugins`, no rendering) steps the
 //!   simulation on a fixed ~30Hz schedule (`run_bevy_app`)
 //!
-//! They talk to each other over a couple of plain channels: incoming
+//! They talk to each other over a few plain channels: incoming
 //! `InputEvent`s flow from the network thread into the Bevy world via a
-//! `crossbeam_channel`, and outgoing `StateSnapshot` JSON flows out via a
+//! `crossbeam_channel`, outgoing `StateSnapshot` JSON flows out via a
 //! `tokio::sync::broadcast` channel (which also gives spectator support -
 //! a 3rd+ connection - for free later, since any number of receivers can
-//! subscribe to the same broadcast).
+//! subscribe to the same broadcast), and a connection ending (closed,
+//! errored, or the peer process killed outright) signals the simulation
+//! over a third `crossbeam_channel` so it can reset whatever movement that
+//! connection last held - see
+//! `docs/issues/combat-foundation/reset-input-on-disconnect.md`.
 
 use crate::combat::{MOVE_SPEED_PER_TICK, MatchState, Player};
 use crate::net_protocol::{CharacterSnapshot, InputEvent, MatchStatus, StateSnapshot};
@@ -43,6 +47,10 @@ pub struct ServerParts {
     pub local_addr: SocketAddr,
     pub incoming_rx: CbReceiver<InputEvent>,
     pub outgoing_tx: broadcast::Sender<String>,
+    /// Fires once per connection, the moment that connection is fully gone
+    /// (clean close, error, or an abrupt drop) - see
+    /// `docs/issues/combat-foundation/reset-input-on-disconnect.md`.
+    pub disconnected_rx: CbReceiver<()>,
 }
 
 /// Bind a WebSocket listener at `bind_addr` and start accepting connections
@@ -51,6 +59,7 @@ pub struct ServerParts {
 /// the OS pick a free port, e.g. in tests).
 pub fn spawn_network_thread(bind_addr: &str) -> io::Result<ServerParts> {
     let (incoming_tx, incoming_rx) = crossbeam_channel::unbounded::<InputEvent>();
+    let (disconnected_tx, disconnected_rx) = crossbeam_channel::unbounded::<()>();
     let (outgoing_tx, _) = broadcast::channel::<String>(32);
     let outgoing_tx_for_net = outgoing_tx.clone();
     let bind_addr = bind_addr.to_string();
@@ -71,7 +80,7 @@ pub fn spawn_network_thread(bind_addr: &str) -> io::Result<ServerParts> {
                 .expect("a bound listener has a local address");
             let _ = addr_tx.send(Ok(local_addr));
 
-            accept_connections(listener, incoming_tx, outgoing_tx_for_net).await;
+            accept_connections(listener, incoming_tx, outgoing_tx_for_net, disconnected_tx).await;
         });
     });
 
@@ -83,6 +92,7 @@ pub fn spawn_network_thread(bind_addr: &str) -> io::Result<ServerParts> {
         local_addr,
         incoming_rx,
         outgoing_tx,
+        disconnected_rx,
     })
 }
 
@@ -93,6 +103,7 @@ async fn accept_connections(
     listener: TcpListener,
     incoming_tx: CbSender<InputEvent>,
     outgoing: broadcast::Sender<String>,
+    disconnected_tx: CbSender<()>,
 ) {
     loop {
         let (stream, _) = match listener.accept().await {
@@ -102,6 +113,7 @@ async fn accept_connections(
 
         let incoming_tx = incoming_tx.clone();
         let mut outgoing_rx = outgoing.subscribe();
+        let disconnected_tx = disconnected_tx.clone();
 
         tokio::spawn(async move {
             let ws_stream = match tokio_tungstenite::accept_async(stream).await {
@@ -131,6 +143,15 @@ async fn accept_connections(
             }
 
             reader.abort();
+
+            // The connection is fully gone now - clean close, error, or the
+            // peer process killed outright, all end up here the same way
+            // (the write loop above breaks the moment a send fails, which
+            // happens quickly once the peer is actually gone). Tell the
+            // simulation so it can stop applying whatever movement this
+            // connection last held, instead of a Character walking on
+            // forever with no one left to release the key.
+            let _ = disconnected_tx.send(());
         });
     }
 }
@@ -150,11 +171,18 @@ struct HeldMovement {
 #[derive(Resource)]
 struct OutgoingSnapshots(broadcast::Sender<String>);
 
+#[derive(Resource)]
+struct DisconnectedConnections(CbReceiver<()>);
+
 /// Run the headless simulation loop. Blocks forever (this is the server
 /// binary's whole reason to exist), stepping `combat::MatchState` on a
 /// fixed ~30Hz schedule regardless of whether a client is connected -
 /// Player 2 exists as a stationary Idle Opponent from the very first tick.
-pub fn run_bevy_app(incoming_rx: CbReceiver<InputEvent>, outgoing_tx: broadcast::Sender<String>) {
+pub fn run_bevy_app(
+    incoming_rx: CbReceiver<InputEvent>,
+    outgoing_tx: broadcast::Sender<String>,
+    disconnected_rx: CbReceiver<()>,
+) {
     App::new()
         .add_plugins(
             MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(
@@ -165,6 +193,7 @@ pub fn run_bevy_app(incoming_rx: CbReceiver<InputEvent>, outgoing_tx: broadcast:
         .insert_resource(IncomingEvents(incoming_rx))
         .insert_resource(HeldMovement::default())
         .insert_resource(OutgoingSnapshots(outgoing_tx))
+        .insert_resource(DisconnectedConnections(disconnected_rx))
         .add_systems(Update, step_simulation)
         .run();
 }
@@ -174,7 +203,22 @@ fn step_simulation(
     incoming: Res<IncomingEvents>,
     mut held: ResMut<HeldMovement>,
     outgoing: Res<OutgoingSnapshots>,
+    disconnected: Res<DisconnectedConnections>,
 ) {
+    // A connection ending - reset whatever movement it left held, or the
+    // Character keeps walking in that direction forever with no one left
+    // to release the key. Only one real connection is modeled today (see
+    // `HeldMovement`), so resetting the whole resource is unconditionally
+    // correct here; once a second real client can connect
+    // (`second-client-controls-player-two.md`), this will need to reset
+    // only the disconnecting player's own held state, not the whole
+    // resource. `try_recv` draining a channel that may have more than one
+    // queued signal is harmless - the reset itself is idempotent.
+    while disconnected.0.try_recv().is_ok() {
+        held.p1_left = false;
+        held.p1_right = false;
+    }
+
     while let Ok(event) = incoming.0.try_recv() {
         match event {
             InputEvent::MoveLeft(pressed) => held.p1_left = pressed,
@@ -252,8 +296,9 @@ mod tests {
             local_addr,
             incoming_rx,
             outgoing_tx,
+            disconnected_rx,
         } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
-        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx));
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
 
         let url = format!("ws://{local_addr}");
         let (mut ws, _) = tokio_tungstenite::connect_async(url)
@@ -284,8 +329,9 @@ mod tests {
             local_addr,
             incoming_rx,
             outgoing_tx,
+            disconnected_rx,
         } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
-        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx));
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
 
         let url = format!("ws://{local_addr}");
         let (mut ws, _) = tokio_tungstenite::connect_async(url)
@@ -320,8 +366,9 @@ mod tests {
             local_addr,
             incoming_rx,
             outgoing_tx,
+            disconnected_rx,
         } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
-        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx));
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
 
         let url = format!("ws://{local_addr}");
         let (mut ws, _) = tokio_tungstenite::connect_async(url)
@@ -362,8 +409,9 @@ mod tests {
             local_addr,
             incoming_rx,
             outgoing_tx,
+            disconnected_rx,
         } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
-        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx));
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
 
         let url = format!("ws://{local_addr}");
         let (mut ws, _) = tokio_tungstenite::connect_async(url)
@@ -415,13 +463,131 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn disconnecting_while_movement_is_held_stops_the_character_from_continuing_to_move() {
+        let ServerParts {
+            local_addr,
+            incoming_rx,
+            outgoing_tx,
+            disconnected_rx,
+        } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
+
+        let url = format!("ws://{local_addr}");
+        let (mut ws, _) = tokio_tungstenite::connect_async(url.clone())
+            .await
+            .expect("client should be able to connect");
+
+        send_event(&mut ws, InputEvent::MoveRight(true)).await;
+
+        tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                if read_snapshot(&mut ws).await.p1.position > 0.0 {
+                    return;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for movement to start");
+
+        // Abruptly drop the connection - no clean close/release event sent,
+        // just gone, the same as a killed client process or a network
+        // drop. The original connection can't be read from anymore once
+        // it's dropped, so reconnect as a fresh observer to watch what
+        // happens next.
+        drop(ws);
+
+        let (mut observer, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("observer client should be able to connect");
+
+        // Find where the position settles (allowing for the server to
+        // actually notice the drop), then confirm it holds there for
+        // several more ticks rather than continuing to drift - i.e. the
+        // held movement was actually reset, not just that the one
+        // connection watching it went away.
+        let settled = tokio::time::timeout(StdDuration::from_secs(5), async {
+            let mut previous = read_snapshot(&mut observer).await.p1.position;
+            loop {
+                let current = read_snapshot(&mut observer).await.p1.position;
+                if current == previous {
+                    return current;
+                }
+                previous = current;
+            }
+        })
+        .await
+        .expect("timed out waiting for movement to stop changing after the disconnect");
+
+        for _ in 0..10 {
+            let snapshot = read_snapshot(&mut observer).await;
+            assert_eq!(snapshot.p1.position, settled);
+        }
+    }
+
+    #[tokio::test]
+    async fn disconnecting_while_move_left_is_held_also_stops_the_character() {
+        // The reset in step_simulation clears both held directions
+        // unconditionally, but that's an implementation detail - confirm
+        // the held-left case actually stops too, not just held-right.
+        let ServerParts {
+            local_addr,
+            incoming_rx,
+            outgoing_tx,
+            disconnected_rx,
+        } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
+
+        let url = format!("ws://{local_addr}");
+        let (mut ws, _) = tokio_tungstenite::connect_async(url.clone())
+            .await
+            .expect("client should be able to connect");
+
+        send_event(&mut ws, InputEvent::MoveLeft(true)).await;
+
+        tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                if read_snapshot(&mut ws).await.p1.position < 0.0 {
+                    return;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for movement to start");
+
+        drop(ws);
+
+        let (mut observer, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("observer client should be able to connect");
+
+        let settled = tokio::time::timeout(StdDuration::from_secs(5), async {
+            let mut previous = read_snapshot(&mut observer).await.p1.position;
+            loop {
+                let current = read_snapshot(&mut observer).await.p1.position;
+                if current == previous {
+                    return current;
+                }
+                previous = current;
+            }
+        })
+        .await
+        .expect("timed out waiting for movement to stop changing after the disconnect");
+
+        for _ in 0..10 {
+            let snapshot = read_snapshot(&mut observer).await;
+            assert_eq!(snapshot.p1.position, settled);
+        }
+    }
+
+    #[tokio::test]
     async fn jump_input_sends_player_one_airborne_and_they_land_again() {
         let ServerParts {
             local_addr,
             incoming_rx,
             outgoing_tx,
+            disconnected_rx,
         } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
-        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx));
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
 
         let url = format!("ws://{local_addr}");
         let (mut ws, _) = tokio_tungstenite::connect_async(url)
@@ -461,8 +627,9 @@ mod tests {
             local_addr,
             incoming_rx,
             outgoing_tx,
+            disconnected_rx,
         } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
-        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx));
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
 
         let url = format!("ws://{local_addr}");
         let (mut ws, _) = tokio_tungstenite::connect_async(url)
@@ -492,8 +659,9 @@ mod tests {
             local_addr,
             incoming_rx,
             outgoing_tx,
+            disconnected_rx,
         } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
-        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx));
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
 
         let url = format!("ws://{local_addr}");
         let (mut ws, _) = tokio_tungstenite::connect_async(url)
@@ -523,8 +691,9 @@ mod tests {
             local_addr,
             incoming_rx,
             outgoing_tx,
+            disconnected_rx,
         } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
-        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx));
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
 
         let url = format!("ws://{local_addr}");
         let (mut ws, _) = tokio_tungstenite::connect_async(url)
@@ -548,8 +717,9 @@ mod tests {
             local_addr,
             incoming_rx,
             outgoing_tx,
+            disconnected_rx,
         } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
-        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx));
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
 
         let url = format!("ws://{local_addr}");
         let (mut ws, _) = tokio_tungstenite::connect_async(url)
@@ -590,8 +760,9 @@ mod tests {
             local_addr,
             incoming_rx,
             outgoing_tx,
+            disconnected_rx,
         } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
-        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx));
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
 
         let url = format!("ws://{local_addr}");
         let (mut ws, _) = tokio_tungstenite::connect_async(url)
