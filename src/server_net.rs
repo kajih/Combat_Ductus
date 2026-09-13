@@ -1100,6 +1100,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rapid_repeated_punch_and_kick_presses_are_throttled_by_the_shared_cooldown() {
+        // See punch-kick-cooldown.md: mashing J/K should land at Punch's
+        // steady cadence, not deal damage on every single keypress.
+        let ServerParts {
+            local_addr,
+            incoming_rx,
+            outgoing_tx,
+            disconnected_rx,
+        } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
+
+        let url = format!("ws://{local_addr}");
+        let (mut ws, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("client should be able to connect");
+
+        move_p1_into_attack_range_of_p2(&mut ws).await;
+
+        // Mash J and K back-to-back, far faster than the cooldown allows -
+        // only the very first should land.
+        for _ in 0..STARTING_HEALTH {
+            send_event(&mut ws, InputEvent::Punch).await;
+            send_event(&mut ws, InputEvent::Kick).await;
+        }
+
+        let after_burst = tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                let snapshot = read_snapshot(&mut ws).await;
+                if snapshot.p2.health < STARTING_HEALTH {
+                    return snapshot;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the first attack in the burst to land");
+        assert_eq!(after_burst.p2.health, STARTING_HEALTH - PUNCH_DAMAGE);
+
+        // Give the server plenty of ticks to (incorrectly) process the rest
+        // of the burst if it were going to - Health should hold right
+        // where the first hit left it.
+        for _ in 0..10 {
+            let snapshot = read_snapshot(&mut ws).await;
+            assert_eq!(snapshot.p2.health, STARTING_HEALTH - PUNCH_DAMAGE);
+        }
+    }
+
+    #[tokio::test]
     async fn restart_request_is_ignored_while_the_match_is_in_progress() {
         let ServerParts {
             local_addr,
@@ -1158,8 +1205,17 @@ mod tests {
             .expect("client should be able to connect");
 
         move_p1_into_attack_range_of_p2(&mut ws).await;
+        // Punch is now cooldown-gated (punch-kick-cooldown.md), so a single
+        // rapid-fire attempt can land on the wrong side of it and be
+        // silently dropped - throw_p1_attack_until retries until each one
+        // actually registers before moving on to the next.
+        let mut expected_health = STARTING_HEALTH;
         for _ in 0..STARTING_HEALTH {
-            send_event(&mut ws, InputEvent::Punch).await;
+            expected_health -= PUNCH_DAMAGE;
+            throw_p1_attack_until(&mut ws, InputEvent::Punch, |snapshot| {
+                snapshot.p2.health <= expected_health
+            })
+            .await;
         }
 
         let ended = tokio::time::timeout(StdDuration::from_secs(5), async {
@@ -1213,13 +1269,26 @@ mod tests {
 
         move_p1_into_attack_range_of_p2(&mut ws).await;
 
-        // Hold movement right through to the winning blow and beyond - the
-        // release event a real client would send once the Match-Ended
-        // screen is showing is deliberately never sent.
-        send_event(&mut ws, InputEvent::MoveRight(true)).await;
-        for _ in 0..STARTING_HEALTH {
-            send_event(&mut ws, InputEvent::Punch).await;
+        // Whittle P2's Health down to the very last hit point without
+        // holding any movement, so the cooldown-spaced Punches (see
+        // punch-kick-cooldown.md) don't have time to drift P1 out of range.
+        let mut expected_health = STARTING_HEALTH;
+        for _ in 0..STARTING_HEALTH - PUNCH_DAMAGE {
+            expected_health -= PUNCH_DAMAGE;
+            throw_p1_attack_until(&mut ws, InputEvent::Punch, |snapshot| {
+                snapshot.p2.health <= expected_health
+            })
+            .await;
         }
+
+        // Now start holding movement right at the instant of the winning
+        // blow itself - the release event a real client would send once
+        // the Match-Ended screen is showing is deliberately never sent.
+        send_event(&mut ws, InputEvent::MoveRight(true)).await;
+        throw_p1_attack_until(&mut ws, InputEvent::Punch, |snapshot| {
+            snapshot.p2.health == 0
+        })
+        .await;
 
         tokio::time::timeout(StdDuration::from_secs(5), async {
             loop {
@@ -1274,8 +1343,16 @@ mod tests {
             .expect("first client should be able to connect");
 
         move_p1_into_attack_range_of_p2(&mut p1).await;
+        // Punch is cooldown-gated (punch-kick-cooldown.md) - land one hit
+        // point at a time rather than firing a burst that would mostly get
+        // silently dropped.
+        let mut expected_health = STARTING_HEALTH;
         for _ in 0..STARTING_HEALTH {
-            send_event(&mut p1, InputEvent::Punch).await;
+            expected_health -= PUNCH_DAMAGE;
+            throw_p1_attack_until(&mut p1, InputEvent::Punch, |snapshot| {
+                snapshot.p2.health <= expected_health
+            })
+            .await;
         }
         tokio::time::timeout(StdDuration::from_secs(5), async {
             loop {
@@ -1382,6 +1459,34 @@ mod tests {
         ws.send(Message::Text(serde_json::to_string(&event).unwrap().into()))
             .await
             .expect("send should succeed");
+    }
+
+    /// Throws P1's `attack` (Punch or Kick) repeatedly until `is_landed`
+    /// reports true against a snapshot, resending every few ticks rather
+    /// than once - a lone attempt can land on the wrong side of Punch/Kick's
+    /// cooldown (punch-kick-cooldown.md) and be silently dropped with no
+    /// feedback, so this is what every test that needs a hit to definitely
+    /// register should use instead of a single `send_event`.
+    async fn throw_p1_attack_until(
+        ws: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        attack: InputEvent,
+        is_landed: impl Fn(&StateSnapshot) -> bool,
+    ) -> StateSnapshot {
+        tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                send_event(ws, attack).await;
+                for _ in 0..5 {
+                    let snapshot = read_snapshot(ws).await;
+                    if is_landed(&snapshot) {
+                        return snapshot;
+                    }
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the attack to land")
     }
 
     /// Sends P1 running toward P2 until they're within Punch/Kick range,
