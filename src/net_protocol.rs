@@ -91,9 +91,30 @@ pub struct StateSnapshot {
     pub status: MatchStatus,
 }
 
+/// Every message kind the server ever sends a client, as one formal tagged
+/// enum - not disambiguated positionally (e.g. "the first message is
+/// always special"), which would silently break if a message were ever
+/// reordered, delayed, or a third kind added later. See
+/// `docs/issues/combat-foundation/connection-identity-indicator.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ServerMessage {
+    /// Sent exactly once, immediately after a connection is accepted and
+    /// assigned a slot - that connection's own `Option<Player>` (`None`
+    /// means it's spectating). Deliberately not folded into
+    /// `StateSnapshot` itself: the broadcast snapshot is serialized once
+    /// per tick and reused verbatim for every connection, and this value
+    /// never changes after connecting, so it doesn't belong in a
+    /// per-connection field of a value that's otherwise identical for
+    /// everyone.
+    YourSlot(Option<Player>),
+    /// Sent every simulation tick thereafter.
+    Snapshot(StateSnapshot),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::combat::STARTING_HEALTH;
 
     fn round_trip<T>(value: &T) -> T
     where
@@ -151,5 +172,40 @@ mod tests {
     fn ended_match_status_round_trips_with_winner() {
         let status = MatchStatus::Ended { winner: Player::P2 };
         assert_eq!(round_trip(&status), status);
+    }
+
+    #[test]
+    fn server_message_round_trips_for_every_variant() {
+        for message in [
+            ServerMessage::YourSlot(Some(Player::P1)),
+            ServerMessage::YourSlot(Some(Player::P2)),
+            ServerMessage::YourSlot(None),
+        ] {
+            assert_eq!(round_trip(&message), message);
+        }
+
+        let snapshot_message = ServerMessage::Snapshot(StateSnapshot {
+            tick: 1,
+            p1: CharacterSnapshot {
+                position: 0.0,
+                facing: Facing::Right,
+                health: STARTING_HEALTH,
+                airborne: false,
+                vertical_offset: 0.0,
+                speaking: false,
+                attacking: None,
+            },
+            p2: CharacterSnapshot {
+                position: 1.0,
+                facing: Facing::Left,
+                health: STARTING_HEALTH,
+                airborne: false,
+                vertical_offset: 0.0,
+                speaking: false,
+                attacking: None,
+            },
+            status: MatchStatus::InProgress,
+        });
+        assert_eq!(round_trip(&snapshot_message), snapshot_message);
     }
 }

@@ -14,10 +14,10 @@ This needs a new piece of wire protocol, not just client UI: the server already 
 
 ## Acceptance criteria
 
-- [ ] The server sends each connection a one-time message, right after slot assignment, carrying that connection's own `Option<Player>`
-- [ ] Both server->client message kinds (the one-time slot message and every ongoing `StateSnapshot`) go through a single, self-describing `ServerMessage` wire type - not positional/ordering-based disambiguation
-- [ ] The client stores its own role in a resource (mirroring how `LatestSnapshot` already works) and displays a persistent, clearly-visible indicator of it throughout the Match ("Player 1" / "Player 2" / "Spectating")
-- [ ] Verified by connecting as the 1st, 2nd, and 3rd simultaneous client and confirming each shows the correct role
+- [x] The server sends each connection a one-time message, right after slot assignment, carrying that connection's own `Option<Player>`
+- [x] Both server->client message kinds (the one-time slot message and every ongoing `StateSnapshot`) go through a single, self-describing `ServerMessage` wire type - not positional/ordering-based disambiguation
+- [x] The client stores its own role in a resource (mirroring how `LatestSnapshot` already works) and displays a persistent, clearly-visible indicator of it throughout the Match ("Player 1" / "Player 2" / "Spectating")
+- [x] Verified by connecting as the 1st, 2nd, and 3rd simultaneous client and confirming each shows the correct role
 
 ## Blocked by
 

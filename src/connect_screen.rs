@@ -12,6 +12,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button as WidgetButton};
 use combat_ductus::client_net::{Connection, ConnectionEvent};
+use combat_ductus::combat::Player;
 use combat_ductus::net_protocol::{InputEvent, StateSnapshot};
 
 const DEFAULT_SERVER_ADDRESS: &str = "127.0.0.1:9000";
@@ -33,6 +34,22 @@ pub enum AppState {
 /// about the connection itself.
 #[derive(Resource, Default, Clone)]
 pub struct LatestSnapshot(pub Option<StateSnapshot>);
+
+/// This connection's own role - which player slot it controls, or that
+/// it's spectating - once the server's one-time
+/// `net_protocol::ServerMessage::YourSlot` has told it. See
+/// `docs/issues/combat-foundation/connection-identity-indicator.md`.
+/// Mirrors `LatestSnapshot`'s own pattern: other modules (e.g. the role
+/// indicator) just read this resource, with no need to know anything
+/// about the connection itself.
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MyRole {
+    /// Briefly, before the server's one-time message arrives.
+    #[default]
+    Unknown,
+    Player(Player),
+    Spectating,
+}
 
 #[derive(Component)]
 struct ConnectScreenRoot;
@@ -79,6 +96,7 @@ impl Plugin for ConnectScreenPlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<AppState>()
             .init_resource::<LatestSnapshot>()
+            .init_resource::<MyRole>()
             .insert_non_send(ConnectionSlot::default())
             .add_systems(OnEnter(AppState::Connecting), spawn_connect_screen)
             .add_systems(OnExit(AppState::Connecting), despawn_connect_screen)
@@ -185,6 +203,7 @@ fn poll_connection(
     state: Res<State<AppState>>,
     mut next_state: ResMut<NextState<AppState>>,
     mut latest_snapshot: ResMut<LatestSnapshot>,
+    mut my_role: ResMut<MyRole>,
 ) {
     let Some(connection) = slot.0.as_mut() else {
         return;
@@ -200,6 +219,12 @@ fn poll_connection(
                 if *state.get() == AppState::Connecting {
                     next_state.set(AppState::InMatch);
                 }
+            }
+            ConnectionEvent::YourSlot(slot) => {
+                *my_role = match slot {
+                    Some(player) => MyRole::Player(player),
+                    None => MyRole::Spectating,
+                };
             }
             ConnectionEvent::Snapshot(snapshot) => {
                 // One of these arrives every server tick (~30/sec) - firehose
@@ -223,6 +248,11 @@ fn poll_connection(
 
     if should_disconnect {
         slot.0 = None;
+        // A new connection may be assigned a different slot entirely
+        // (e.g. reconnecting after Player 1's real slot has already been
+        // taken over by someone else) - don't leave a stale role showing
+        // from this one.
+        *my_role = MyRole::Unknown;
         // If we drop out of an in-progress Match (or the Match-Ended
         // screen), fall back to the Connect screen so the player isn't left
         // staring at a frozen, uninteractive view with no way to retry.
