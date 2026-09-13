@@ -1,12 +1,12 @@
 [package]
-name = "combat_ductus"
+name = "combat-ductus"
 version = "0.1.0"
 edition = "2024"
 # Now that `server` (src/bin/server.rs) exists alongside the default client
 # binary (src/main.rs), `cargo run` needs to know which one is unambiguous
 # for day-to-day use - the client, per CLAUDE.md. Run the server explicitly
 # with `cargo run --bin server`.
-default-run = "combat_ductus"
+default-run = "combat-ductus"
 
 [dependencies]
 bevy = "0.19.1"

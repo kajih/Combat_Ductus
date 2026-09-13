@@ -2057,7 +2057,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "combat_ductus"
+name = "combat-ductus"
 version = "0.1.0"
 dependencies = [
  "bevy",
