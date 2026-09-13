@@ -4,7 +4,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-This is an early-stage Rust/Bevy project. `src/main.rs` currently just opens an empty window (`App::new().add_plugins(DefaultPlugins).run()`) — no game code, ECS setup, or module structure exists yet. There is no architecture to describe until real code is added; update this file once the project takes shape (e.g. plugin structure, module layout, component/resource design).
+Past the early-stage/empty-window point — a real client/server versus fighter with two networked players, per `CONTEXT.md`'s domain model and the ADRs/PRDs in `docs/`. Two binaries share one library crate:
+
+- **`client`** (`src/main.rs`, the default binary) — `DefaultPlugins`, built both as the fast native dev build and as the Trunk/wasm web build. Pure renderer per ADR 0005: never simulates, only reacts to server snapshots.
+- **`server`** (`src/bin/server.rs`) — headless (`MinimalPlugins`, no rendering), native-only (`#[cfg(not(target_arch = "wasm32"))]` — a browser tab can't bind a listening socket). Owns the one authoritative `combat::MatchState` and steps it every tick regardless of who's connected.
+
+Shared library modules (`src/lib.rs`, used by both binaries):
+- **`combat`** — the deep module: pure Rust, no Bevy/networking dependency. Health, damage, range checks, Jump's arc, Special's gating and cooldown, Match-end/winner detection. The only module carrying unit tests.
+- **`net_protocol`** — shared wire types (`InputEvent`, `StateSnapshot`, `MatchStatus`), plain serde structs/enums, JSON over WebSocket. Compiles identically on `wasm32-unknown-unknown` and native.
+- **`server_net`** (native-only) — the server binary's guts: WebSocket accept loop (per-connection player-slot assignment, spectator fallback, disconnect handling) on a small tokio runtime, plus the Bevy app that steps `combat::MatchState` on a fixed ~30Hz schedule and broadcasts snapshots.
+- **`client_net`** — the client's WebSocket connection wrapper (`ewebsock`), compiles on both targets with one poll-based API.
+
+Client-only modules (`src/*.rs`, wired up in `main.rs`):
+- **`connect_screen`** — the Connect screen UI, connection lifecycle, the `AppState` state machine (`Connecting` → `InMatch` → `MatchEnded`), and the `LatestSnapshot` resource everything else reads from.
+- **`character_rig`** — composites a Character at runtime from layered torso/arm/leg/face sprite entities per (Body Type, Facing), per ADR 0007/0006.
+- **`match_characters`** — spawns/positions both Characters from server snapshots, drives Punch/Kick limb-swing poses and the Motivational Speech bubble.
+- **`health_hud`** — plain Health readout overlay, no polish by design.
+- **`match_end_screen`** — the "X wins" screen and its restart control.
+- **`input`** — captures A/D/Space/J/K/H and forwards them to the server as `InputEvent`s; never simulates locally.
+- **`stage`** — the single fixed Stage backdrop and its static camera.
+- **`asset_diagnostics`** — logs image asset load success/failure (a first slice of `docs/issues/observability/logging.md`).
+
+Update this section again once the architecture changes meaningfully (a new milestone, a new module boundary) rather than letting it drift stale.
 
 ## Git workflow & issue tracking
 
