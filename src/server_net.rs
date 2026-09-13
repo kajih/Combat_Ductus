@@ -28,7 +28,9 @@
 //! and `docs/issues/combat-foundation/second-client-controls-player-two.md`.
 
 use crate::combat::{MOVE_SPEED_PER_TICK, MatchState, Player};
-use crate::net_protocol::{CharacterSnapshot, InputEvent, MatchStatus, StateSnapshot};
+use crate::net_protocol::{
+    CharacterSnapshot, InputEvent, MatchStatus, ServerMessage, StateSnapshot,
+};
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver as CbReceiver, Sender as CbSender};
@@ -203,6 +205,28 @@ async fn accept_connections(
                 }
             };
             let (mut write, mut read) = ws_stream.split();
+
+            // A one-time message telling this connection its own role -
+            // which player slot it holds, or that it's spectating - before
+            // it ever starts forwarding the shared broadcast below. See
+            // docs/issues/combat-foundation/connection-identity-indicator.md.
+            let your_slot_json = serde_json::to_string(&ServerMessage::YourSlot(slot))
+                .expect("ServerMessage always serializes");
+            if write
+                .send(Message::Text(your_slot_json.into()))
+                .await
+                .is_err()
+            {
+                // Gone before we could even tell it its own slot - free the
+                // slot the same as an outright accept failure above.
+                if let Some(player) = slot {
+                    slots
+                        .lock()
+                        .expect("slot assignment mutex was poisoned")
+                        .set_taken(player, false);
+                }
+                return;
+            }
 
             let reader = tokio::spawn(async move {
                 while let Some(Ok(message)) = read.next().await {
@@ -403,7 +427,8 @@ fn step_simulation(
     match_state.0.advance_tick();
 
     let snapshot = snapshot_from_state(&match_state.0);
-    if let Ok(json) = serde_json::to_string(&snapshot) {
+    let message = ServerMessage::Snapshot(snapshot);
+    if let Ok(json) = serde_json::to_string(&message) {
         // No connected clients yet is a normal state (Idle Opponent era) -
         // an error here just means nobody is subscribed, not a real failure.
         let _ = outgoing.0.send(json);
@@ -460,17 +485,12 @@ mod tests {
 
         // The server steps and broadcasts on its own fixed schedule
         // regardless of input - the very first snapshot proves that.
-        let message = tokio::time::timeout(StdDuration::from_secs(5), ws.next())
+        // (The very first *message* is actually this connection's own
+        // YourSlot - read_snapshot skips past that on its way to the
+        // first real Snapshot.)
+        let snapshot = tokio::time::timeout(StdDuration::from_secs(5), read_snapshot(&mut ws))
             .await
-            .expect("timed out waiting for a snapshot")
-            .expect("connection closed unexpectedly")
-            .expect("websocket error");
-
-        let Message::Text(text) = message else {
-            panic!("expected a text snapshot message, got {message:?}");
-        };
-        let snapshot: StateSnapshot =
-            serde_json::from_str(text.as_str()).expect("snapshot should deserialize");
+            .expect("timed out waiting for a snapshot");
         assert_eq!(snapshot.p1.health, STARTING_HEALTH);
         assert_eq!(snapshot.p2.health, STARTING_HEALTH);
         assert_eq!(snapshot.status, MatchStatus::InProgress);
@@ -593,6 +613,43 @@ mod tests {
             assert_eq!(snapshot.p1.health, starting.p1.health);
             assert_eq!(snapshot.p2.health, starting.p2.health);
         }
+    }
+
+    #[tokio::test]
+    async fn each_connection_is_told_its_own_slot_right_after_connecting() {
+        let ServerParts {
+            local_addr,
+            incoming_rx,
+            outgoing_tx,
+            disconnected_rx,
+        } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
+
+        let url = format!("ws://{local_addr}");
+        let (mut p1, _) = tokio_tungstenite::connect_async(url.clone())
+            .await
+            .expect("first client should be able to connect");
+        let (mut p2, _) = tokio_tungstenite::connect_async(url.clone())
+            .await
+            .expect("second client should be able to connect");
+        let (mut spectator, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("third client should be able to connect");
+
+        // The very first message each connection receives - before any
+        // Snapshot - is its own YourSlot, not inferred from message order.
+        assert_eq!(
+            read_server_message(&mut p1).await,
+            Some(ServerMessage::YourSlot(Some(Player::P1)))
+        );
+        assert_eq!(
+            read_server_message(&mut p2).await,
+            Some(ServerMessage::YourSlot(Some(Player::P2)))
+        );
+        assert_eq!(
+            read_server_message(&mut spectator).await,
+            Some(ServerMessage::YourSlot(None))
+        );
     }
 
     #[tokio::test]
@@ -1527,20 +1584,41 @@ mod tests {
         .expect("timed out waiting for movement to settle");
     }
 
+    /// Reads server messages until a `Snapshot` arrives, silently skipping
+    /// anything else (namely the one-time `YourSlot` message every
+    /// connection gets right after connecting - most tests here don't care
+    /// about their own slot, only the ongoing snapshot stream).
     async fn read_snapshot(
         ws: &mut tokio_tungstenite::WebSocketStream<
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
         >,
     ) -> StateSnapshot {
         loop {
-            let message = ws
-                .next()
-                .await
-                .expect("connection closed unexpectedly")
-                .expect("websocket error");
-            if let Message::Text(text) = message {
-                return serde_json::from_str(text.as_str()).expect("snapshot should deserialize");
+            if let Some(ServerMessage::Snapshot(snapshot)) = read_server_message(ws).await {
+                return snapshot;
             }
+        }
+    }
+
+    /// Reads the next server message and deserializes it as a
+    /// `ServerMessage` - `None` if the frame wasn't text (e.g. a
+    /// ping/pong), so callers can loop past those without treating them as
+    /// a protocol violation.
+    async fn read_server_message(
+        ws: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    ) -> Option<ServerMessage> {
+        let message = ws
+            .next()
+            .await
+            .expect("connection closed unexpectedly")
+            .expect("websocket error");
+        match message {
+            Message::Text(text) => {
+                Some(serde_json::from_str(text.as_str()).expect("message should deserialize"))
+            }
+            _ => None,
         }
     }
 }

@@ -53,12 +53,13 @@ enum Slot {
 #[derive(Component)]
 struct CharacterRoot;
 
-/// Marks a Character's speech-bubble text entity (a child of its
-/// `CharacterRoot`, so it automatically follows that Character's position -
-/// including its Jump arc - for free via ordinary transform propagation,
-/// with no extra position-tracking code of its own). Toggled by
-/// `update_speech_bubbles` from that Character's `speaking` flag on the
-/// latest snapshot.
+/// Marks both of a Character's speech-bubble entities - the background
+/// panel and the text in front of it, as two sibling children of its
+/// `CharacterRoot` (so each automatically follows that Character's
+/// position, including its Jump arc, for free via ordinary transform
+/// propagation, with no extra position-tracking code of its own).
+/// `update_speech_bubbles` toggles `Visibility` on every entity this marks
+/// at once, so the panel and text always show/hide together.
 #[derive(Component)]
 struct SpeechBubble;
 
@@ -71,6 +72,16 @@ const SPEECH_BUBBLE_Y_OFFSET_ABOVE_HEAD: f32 = 90.0;
 /// Rendered well above every other part of the rig (torso/limbs/face all
 /// sit at Z 0-3 inside `character_rig`) so the bubble is never occluded.
 const Z_SPEECH_BUBBLE: f32 = 10.0;
+
+/// The speech bubble's background panel size, in the same unscaled
+/// local-pixel space as the rest of the rig - sized generously enough to
+/// cover both of today's placeholder lines (`speech_bubble_text`) at
+/// `SPEECH_BUBBLE_FONT_SIZE`. Picked by eye, like `CHARACTER_SCALE`; will
+/// need revisiting if the placeholder text is ever replaced with
+/// something longer.
+const SPEECH_BUBBLE_BACKGROUND_SIZE: Vec2 = Vec2::new(520.0, 60.0);
+
+const SPEECH_BUBBLE_FONT_SIZE: f32 = 40.0;
 
 /// Placeholder Motivational Speech line per player slot. Two distinct,
 /// hardcoded lines are correct for M0/M1, not a shortcut: there's no
@@ -144,27 +155,52 @@ fn spawn_match_characters(mut commands: Commands, asset_server: Res<AssetServer>
         commands.entity(entities.arm).insert(slot);
         commands.entity(entities.leg).insert(slot);
 
-        // Child of the root, in the same unscaled local-pixel space as the
-        // torso/arm/leg/face - it inherits the root's position (and scale)
-        // automatically, so it follows the Character (including its Jump
-        // arc) with no extra tracking code needed here.
+        // Children of the root, in the same unscaled local-pixel space as
+        // the torso/arm/leg/face - each inherits the root's position (and
+        // scale) automatically, so it follows the Character (including its
+        // Jump arc) with no extra tracking code needed here. Two sibling
+        // entities (a background panel, then the text in front of it), not
+        // a wrapper/child pair - `Text2d` two levels deep under `root`
+        // rendered as invisible in practice (a Bevy quirk with nested
+        // Transform hierarchies), so both share the `SpeechBubble` marker
+        // directly instead, and `update_speech_bubbles` just toggles
+        // however many entities match it.
         let head_offset = character_rig::head_local_offset(BodyType::Medium, facing);
+        let bubble_x = head_offset.x;
+        let bubble_y = head_offset.y + SPEECH_BUBBLE_Y_OFFSET_ABOVE_HEAD;
         commands.entity(entities.root).with_children(|parent| {
+            // Plain white Text2d with no background could end up nearly
+            // invisible against the Stage's own light-wall/dark-floor
+            // backdrop depending on where the Character is standing - the
+            // same problem the Health HUD already solved (see its own
+            // comment on why it has a background panel). A dark panel
+            // behind the text guarantees contrast regardless of what's
+            // behind it, rather than picking a different single text color
+            // that could just as easily fail against some other part of
+            // the Stage.
             parent.spawn((
                 SpeechBubble,
                 slot,
                 Visibility::Hidden,
-                Transform::from_xyz(
-                    head_offset.x,
-                    head_offset.y + SPEECH_BUBBLE_Y_OFFSET_ABOVE_HEAD,
-                    Z_SPEECH_BUBBLE,
-                ),
+                Sprite {
+                    color: Color::srgba(0.0, 0.0, 0.0, 0.6),
+                    custom_size: Some(SPEECH_BUBBLE_BACKGROUND_SIZE),
+                    ..default()
+                },
+                Transform::from_xyz(bubble_x, bubble_y, Z_SPEECH_BUBBLE),
+            ));
+            parent.spawn((
+                SpeechBubble,
+                slot,
+                Visibility::Hidden,
                 Text2d::new(speech_bubble_text(slot)),
                 TextFont {
-                    font_size: bevy::text::FontSize::Px(40.0),
+                    font_size: bevy::text::FontSize::Px(SPEECH_BUBBLE_FONT_SIZE),
                     ..default()
                 },
                 TextColor(Color::WHITE),
+                // Slightly in front of the background panel above.
+                Transform::from_xyz(bubble_x, bubble_y, Z_SPEECH_BUBBLE + 0.1),
             ));
         });
     }

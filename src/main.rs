@@ -8,6 +8,7 @@ mod health_hud;
 mod input;
 mod match_characters;
 mod match_end_screen;
+mod role_indicator;
 mod stage;
 
 use asset_diagnostics::AssetDiagnosticsPlugin;
@@ -17,6 +18,7 @@ use health_hud::HealthHudPlugin;
 use input::PlayerInputPlugin;
 use match_characters::MatchCharactersPlugin;
 use match_end_screen::MatchEndScreenPlugin;
+use role_indicator::RoleIndicatorPlugin;
 use stage::StagePlugin;
 
 fn main() {
@@ -41,5 +43,6 @@ fn main() {
         .add_plugins(PlayerInputPlugin)
         .add_plugins(HealthHudPlugin)
         .add_plugins(MatchEndScreenPlugin)
+        .add_plugins(RoleIndicatorPlugin)
         .run();
 }

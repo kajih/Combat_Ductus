@@ -4,7 +4,8 @@
 //! with the same poll-based API, so this module needs no `cfg`-gating of its
 //! own (unlike `server_net`, which only exists on native).
 
-use crate::net_protocol::{InputEvent, StateSnapshot};
+use crate::combat::Player;
+use crate::net_protocol::{InputEvent, ServerMessage, StateSnapshot};
 use ewebsock::{WsEvent, WsMessage};
 
 /// Something worth telling the rest of the client about, distilled from the
@@ -13,10 +14,13 @@ use ewebsock::{WsEvent, WsMessage};
 pub enum ConnectionEvent {
     /// The WebSocket handshake completed; the connection is now usable.
     Opened,
+    /// This connection's own role - arrives exactly once, from the
+    /// server's one-time `net_protocol::ServerMessage::YourSlot`.
+    YourSlot(Option<Player>),
     /// A `net_protocol::StateSnapshot` arrived and deserialized successfully.
     Snapshot(StateSnapshot),
-    /// The connection failed, or a message arrived that wasn't a snapshot
-    /// this client understood.
+    /// The connection failed, or a message arrived that wasn't a server
+    /// message this client understood.
     Error(String),
     /// The connection was closed (by either side).
     Closed,
@@ -52,9 +56,10 @@ impl Connection {
         match self.receiver.try_recv()? {
             WsEvent::Opened => Some(ConnectionEvent::Opened),
             WsEvent::Message(WsMessage::Text(text)) => match serde_json::from_str(&text) {
-                Ok(snapshot) => Some(ConnectionEvent::Snapshot(snapshot)),
+                Ok(ServerMessage::YourSlot(slot)) => Some(ConnectionEvent::YourSlot(slot)),
+                Ok(ServerMessage::Snapshot(snapshot)) => Some(ConnectionEvent::Snapshot(snapshot)),
                 Err(err) => Some(ConnectionEvent::Error(format!(
-                    "received a message that wasn't a valid state snapshot: {err}"
+                    "received a message that wasn't a valid server message: {err}"
                 ))),
             },
             // Binary/ping/pong/unknown frames aren't part of this protocol.
@@ -111,6 +116,17 @@ mod tests {
         poll_until(&mut connection, Duration::from_secs(5), |event| {
             matches!(event, ConnectionEvent::Opened).then_some(())
         });
+
+        // The very first connection is always assigned Player 1.
+        let slot = poll_until(
+            &mut connection,
+            Duration::from_secs(5),
+            |event| match event {
+                ConnectionEvent::YourSlot(slot) => Some(slot),
+                _ => None,
+            },
+        );
+        assert_eq!(slot, Some(Player::P1));
 
         let snapshot = poll_until(
             &mut connection,

@@ -10,9 +10,9 @@ Root cause (diagnosed, not just observed): the bubble is currently plain white `
 
 ## Acceptance criteria
 
-- [ ] The speech bubble's text is clearly readable regardless of where on the Stage the casting Character is standing
-- [ ] The fix follows the same "background panel behind text" approach already established by the Health HUD, for visual consistency across the client's text overlays
-- [ ] Verified by casting Motivational Speech at multiple positions on the Stage (near a wall, near the floor band) and confirming the text stays legible in each
+- [x] The speech bubble's text is clearly readable regardless of where on the Stage the casting Character is standing
+- [x] The fix follows the same "background panel behind text" approach already established by the Health HUD, for visual consistency across the client's text overlays
+- [x] Verified by casting Motivational Speech at multiple positions on the Stage (near a wall, near the floor band) and confirming the text stays legible in each
 
 ## Blocked by
 
