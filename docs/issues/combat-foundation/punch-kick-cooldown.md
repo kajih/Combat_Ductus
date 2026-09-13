@@ -25,12 +25,12 @@ Remaining open branch: the exact tuning values (Kick's cooldown duration, from w
 
 ## Acceptance criteria
 
-- [ ] Kick cannot be thrown again until a full cooldown has elapsed since the last Punch *or* Kick, whichever was more recent
-- [ ] Punch cannot be thrown again until half that cooldown has elapsed since the last Punch *or* Kick, whichever was more recent
-- [ ] A cooldown-gated Punch/Kick attempt produces no damage and no animation/feedback of any kind
-- [ ] The cooldown timestamp lives in `CharacterState` and is confirmed to reset naturally on a Match restart (no separate reset code needed, verified by a test)
-- [ ] Existing Punch/Kick damage, range-check, and airborne-lockout behavior is unchanged - this only adds a new gating condition alongside them
-- [ ] Verified by unit tests mirroring `combat.rs`'s existing Special-cooldown test (`special_is_gated_by_cooldown`), including the cross-blocking case (a Kick delaying the next Punch, and vice versa), plus a server integration test exercising rapid repeated J/K presses
+- [x] Kick cannot be thrown again until a full cooldown has elapsed since the last Punch *or* Kick, whichever was more recent
+- [x] Punch cannot be thrown again until half that cooldown has elapsed since the last Punch *or* Kick, whichever was more recent
+- [x] A cooldown-gated Punch/Kick attempt produces no damage and no animation/feedback of any kind
+- [x] The cooldown timestamp lives in `CharacterState` and is confirmed to reset naturally on a Match restart (no separate reset code needed, verified by a test)
+- [x] Existing Punch/Kick damage, range-check, and airborne-lockout behavior is unchanged - this only adds a new gating condition alongside them
+- [x] Verified by unit tests mirroring `combat.rs`'s existing Special-cooldown test (`special_is_gated_by_cooldown`), including the cross-blocking case (a Kick delaying the next Punch, and vice versa), plus a server integration test exercising rapid repeated J/K presses
 
 ## Blocked by
 

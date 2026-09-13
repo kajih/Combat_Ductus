@@ -14,11 +14,11 @@ This is the same *class* of bug `reset-input-on-disconnect.md` already fixed, bu
 
 ## Acceptance criteria
 
-- [ ] Winning a Match while holding a movement key, then restarting, does not leave that Character moving on its own once the new Match begins
-- [ ] This holds even when the key was released while the Match-Ended screen was showing (the release event that never reached the server is accounted for, not relying on lucky timing)
-- [ ] Both players' `HeldMovement` is reset on restart, not just the winner's - e.g. the losing player was also holding a key at match-end
-- [ ] Existing disconnect-triggered `HeldMovement` reset (`reset-input-on-disconnect.md`) is unaffected
-- [ ] Verified by winning while holding A or D, restarting, and confirming the Character stays still until a movement key is freshly pressed again
+- [x] Winning a Match while holding a movement key, then restarting, does not leave that Character moving on its own once the new Match begins
+- [x] This holds even when the key was released while the Match-Ended screen was showing (the release event that never reached the server is accounted for, not relying on lucky timing)
+- [x] Both players' `HeldMovement` is reset on restart, not just the winner's - e.g. the losing player was also holding a key at match-end
+- [x] Existing disconnect-triggered `HeldMovement` reset (`reset-input-on-disconnect.md`) is unaffected
+- [x] Verified by winning while holding A or D, restarting, and confirming the Character stays still until a movement key is freshly pressed again
 
 ## Blocked by
 
