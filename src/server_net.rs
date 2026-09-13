@@ -365,6 +365,16 @@ fn step_simulation(
                 // ended - this resets a concluded Match, not an active one.
                 if match_state.0.has_ended() {
                     match_state.0 = MatchState::new();
+                    // A player holding a movement key at the instant the
+                    // Match ended stops sending input entirely once the
+                    // client leaves AppState::InMatch - so a release event
+                    // may never arrive, leaving this stale in HeldMovement
+                    // forever. Reset both players unconditionally (not just
+                    // whichever one might be affected), matching
+                    // MatchState::new()'s own "everyone gets a clean slate"
+                    // reset. See reset-input-on-match-restart.md.
+                    held.reset(Player::P1);
+                    held.reset(Player::P2);
                 }
             }
             other => {
@@ -1179,6 +1189,70 @@ mod tests {
 
         assert_eq!(restarted.p1.health, STARTING_HEALTH);
         assert_eq!(restarted.p2.health, STARTING_HEALTH);
+    }
+
+    #[tokio::test]
+    async fn restart_resets_held_movement_so_a_character_does_not_keep_walking_on_its_own() {
+        // Reproduces reset-input-on-match-restart.md: a player holding a
+        // movement key at the instant the winning blow lands never gets a
+        // chance to send the release event (the client leaves
+        // AppState::InMatch and stops running its input systems entirely) -
+        // simulated here by simply never sending MoveRight(false) at all.
+        let ServerParts {
+            local_addr,
+            incoming_rx,
+            outgoing_tx,
+            disconnected_rx,
+        } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
+
+        let url = format!("ws://{local_addr}");
+        let (mut ws, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("client should be able to connect");
+
+        move_p1_into_attack_range_of_p2(&mut ws).await;
+
+        // Hold movement right through to the winning blow and beyond - the
+        // release event a real client would send once the Match-Ended
+        // screen is showing is deliberately never sent.
+        send_event(&mut ws, InputEvent::MoveRight(true)).await;
+        for _ in 0..STARTING_HEALTH {
+            send_event(&mut ws, InputEvent::Punch).await;
+        }
+
+        tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                let snapshot = read_snapshot(&mut ws).await;
+                if matches!(snapshot.status, MatchStatus::Ended { .. }) {
+                    return snapshot;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the match to end");
+
+        send_event(&mut ws, InputEvent::RequestRestart).await;
+
+        let restarted = tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                let snapshot = read_snapshot(&mut ws).await;
+                if matches!(snapshot.status, MatchStatus::InProgress) {
+                    return snapshot;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the match to restart");
+
+        // MoveRight(true) was never released - if HeldMovement weren't
+        // reset on restart, P1 would immediately resume drifting right on
+        // its own from the new Match's very first tick.
+        let starting_position = restarted.p1.position;
+        for _ in 0..10 {
+            let snapshot = read_snapshot(&mut ws).await;
+            assert_eq!(snapshot.p1.position, starting_position);
+        }
     }
 
     #[tokio::test]
