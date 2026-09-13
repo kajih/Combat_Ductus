@@ -98,6 +98,12 @@ pub const JUMP_DURATION_TICKS: u8 = 24;
 /// Placeholder tuning value.
 pub const JUMP_HEIGHT: f32 = 0.8;
 
+/// How long a successfully-cast Motivational Speech's speech-bubble VFX
+/// stays up, in ticks - long enough to actually read a short line of text,
+/// noticeably longer than `ATTACK_ANIMATION_TICKS`. Placeholder tuning
+/// value; ~2 seconds at the server's ~30Hz tick rate.
+pub const SPEECH_BUBBLE_DURATION_TICKS: u8 = 60;
+
 /// One Character's simulated state within a Match.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CharacterState {
@@ -112,6 +118,13 @@ pub struct CharacterState {
     /// actual height, only on `airborne` itself.
     pub vertical_offset: f32,
     jump_ticks_remaining: u8,
+    /// Whether a successfully-cast Motivational Speech's speech-bubble VFX
+    /// is currently showing. Only ever set by a *successful* Special cast -
+    /// unlike Punch/Kick, a rejected/gated Special has no feedback at all
+    /// (see `attack_animation`'s doc comment and the existing
+    /// `special_never_starts_an_attack_animation` test).
+    pub speaking: bool,
+    speech_bubble_ticks_remaining: u8,
     /// The tick Special was last successfully cast, if ever. Cooldown is
     /// measured from this.
     pub special_last_cast_tick: Option<u64>,
@@ -134,6 +147,8 @@ impl CharacterState {
             airborne: false,
             vertical_offset: 0.0,
             jump_ticks_remaining: 0,
+            speaking: false,
+            speech_bubble_ticks_remaining: 0,
             special_last_cast_tick: None,
             last_hit_tick: None,
             attack_animation: None,
@@ -180,6 +195,20 @@ impl CharacterState {
         let elapsed = JUMP_DURATION_TICKS - self.jump_ticks_remaining;
         let progress = elapsed as f32 / JUMP_DURATION_TICKS as f32;
         self.vertical_offset = JUMP_HEIGHT * 4.0 * progress * (1.0 - progress);
+    }
+
+    fn start_speech_bubble(&mut self) {
+        self.speaking = true;
+        self.speech_bubble_ticks_remaining = SPEECH_BUBBLE_DURATION_TICKS;
+    }
+
+    fn tick_speech_bubble(&mut self) {
+        if self.speech_bubble_ticks_remaining > 0 {
+            self.speech_bubble_ticks_remaining -= 1;
+            if self.speech_bubble_ticks_remaining == 0 {
+                self.speaking = false;
+            }
+        }
     }
 }
 
@@ -233,6 +262,8 @@ impl MatchState {
         self.p2.tick_attack_animation();
         self.p1.tick_jump();
         self.p2.tick_jump();
+        self.p1.tick_speech_bubble();
+        self.p2.tick_speech_bubble();
     }
 
     /// Move `player` by `delta` world units (positive = toward the
@@ -314,7 +345,9 @@ impl MatchState {
         };
 
         if attack == Attack::Special {
-            self.character_mut(attacker).special_last_cast_tick = Some(tick);
+            let attacker_state = self.character_mut(attacker);
+            attacker_state.special_last_cast_tick = Some(tick);
+            attacker_state.start_speech_bubble();
         }
 
         let defender_state = self.character_mut(defender);
@@ -480,6 +513,7 @@ mod tests {
 
         assert!(m.apply_attack(Player::P1, Attack::Special));
         assert_eq!(m.p2.health, STARTING_HEALTH - SPECIAL_DAMAGE);
+        assert!(m.p1.speaking);
     }
 
     #[test]
@@ -489,6 +523,7 @@ mod tests {
         m.p2 = state_at(SPECIAL_MIN_RANGE, Facing::Left);
 
         assert!(!m.apply_attack(Player::P1, Attack::Special));
+        assert!(!m.p1.speaking);
     }
 
     #[test]
@@ -544,6 +579,42 @@ mod tests {
         // One tick further - lockout has elapsed.
         m.tick += 1;
         assert!(m.apply_attack(Player::P1, Attack::Special));
+    }
+
+    #[test]
+    fn rejected_special_casts_never_show_a_speech_bubble() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+
+        // Too close - gated by minimum range.
+        m.p2 = state_at(SPECIAL_MIN_RANGE, Facing::Left);
+        assert!(!m.apply_attack(Player::P1, Attack::Special));
+        assert!(!m.p1.speaking);
+
+        // Far enough now, but still within cooldown from a prior cast.
+        m.p2 = state_at(SPECIAL_MIN_RANGE + 1.0, Facing::Left);
+        assert!(m.apply_attack(Player::P1, Attack::Special));
+        m.p1.speaking = false; // reset to isolate the next (rejected) cast
+        assert!(!m.apply_attack(Player::P1, Attack::Special));
+        assert!(!m.p1.speaking);
+    }
+
+    #[test]
+    fn speech_bubble_clears_after_its_duration() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+        m.p2 = state_at(SPECIAL_MIN_RANGE + 1.0, Facing::Left);
+
+        m.apply_attack(Player::P1, Attack::Special);
+        assert!(m.p1.speaking);
+
+        for _ in 0..SPEECH_BUBBLE_DURATION_TICKS - 1 {
+            m.advance_tick();
+            assert!(m.p1.speaking);
+        }
+
+        m.advance_tick();
+        assert!(!m.p1.speaking);
     }
 
     #[test]

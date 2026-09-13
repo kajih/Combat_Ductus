@@ -61,6 +61,10 @@ pub struct CharacterSnapshot {
     /// abstract game-position units as `position`. Zero whenever `airborne`
     /// is false. Rendering-only.
     pub vertical_offset: f32,
+    /// Whether this Character's Motivational Speech speech-bubble VFX is
+    /// currently showing - only ever true after a *successful* Special
+    /// cast (a rejected/gated attempt has no feedback at all).
+    pub speaking: bool,
     /// Which attack's arm/leg swing is currently animating, if any - only
     /// ever `Punch` or `Kick` (Special's feedback is a separate VFX, not a
     /// limb swing). Set the instant the attack is thrown, regardless of
@@ -125,6 +129,7 @@ mod tests {
                 health: 3,
                 airborne: false,
                 vertical_offset: 0.0,
+                speaking: true,
                 attacking: Some(Attack::Punch),
             },
             p2: CharacterSnapshot {
@@ -133,6 +138,7 @@ mod tests {
                 health: 5,
                 airborne: true,
                 vertical_offset: 0.6,
+                speaking: false,
                 attacking: None,
             },
             status: MatchStatus::InProgress,
