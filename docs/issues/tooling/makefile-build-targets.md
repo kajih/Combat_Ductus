@@ -16,15 +16,17 @@ Remaining open branch: exact target names beyond `help`/`all`/`clean` (e.g. `dev
 
 ## Acceptance criteria
 
-- [ ] Bare `make` prints available targets and takes no other action
-- [ ] A target builds and can run the fast native dev client (`--features dev`)
-- [ ] A target produces the release-equivalent native build (plain `cargo build`)
-- [ ] A target builds/runs the server binary
-- [ ] A target runs `trunk serve` for local web development
+- [x] Bare `make` prints available targets and takes no other action
+- [x] A target builds and can run the fast native dev client (`--features dev`)
+- [x] A target produces the release-equivalent native build (plain `cargo build`)
+- [x] A target builds/runs the server binary
+- [x] A target runs `trunk serve` for local web development
 - [ ] `make all` builds every non-running artifact (native release, server, `trunk build --release`) without starting `dev` or `web`
-- [ ] `make clean` removes both `target/` and `dist/` so a subsequent build starts genuinely from scratch
-- [ ] The Makefile and its targets are documented in `CLAUDE.md`/`README.md` alongside (not replacing) the existing plain-cargo commands, since those remain valid on a machine without `make`
-- [ ] Nothing in the Makefile assumes Windows; the one Windows-specific note is `make`'s own installation prerequisite, documented alongside the project's existing Windows-only setup notes
+- [x] `make clean` removes both `target/` and `dist/` so a subsequent build starts genuinely from scratch
+- [x] The Makefile and its targets are documented in `CLAUDE.md`/`README.md` alongside (not replacing) the existing plain-cargo commands, since those remain valid on a machine without `make`
+- [x] Nothing in the Makefile assumes Windows; the one Windows-specific note is `make`'s own installation prerequisite, documented alongside the project's existing Windows-only setup notes
+
+**`make all` left unchecked**: `make build`, `make server`, `make dev`, `make web`, and `make clean` were all verified working live on this machine. `make web-release` (and so `make all`, which depends on it) currently fails on this machine partway through `trunk build --release`'s `wasm-opt` post-processing step (`error copying (optimized) wasm file to dist dir: The system cannot find the path specified. (os error 3)`). This reproduces with the bare `trunk build --release` command too, unchanged by this issue - it's a pre-existing environment/tooling issue on this Windows machine, not a regression introduced by the Makefile. Worth its own tooling issue if it turns out to affect other machines too.
 
 ## Blocked by
 
