@@ -10,10 +10,10 @@ This needs the server to assign connections to player slots (first connection = 
 
 ## Acceptance criteria
 
-- [ ] A first connection is assigned Player 1, as today
-- [ ] A second connection is assigned Player 2, and its A/D/J/K input actually moves and attacks with Player 2, instead of being ignored or misapplied to Player 1
-- [ ] The moment a second client connects, Player 2 stops behaving as the stationary Idle Opponent and becomes a normal controlled Character
-- [ ] If the second client disconnects, Player 2 reverts to being a stationary Idle Opponent again rather than continuing to move/attack on its own
+- [x] A first connection is assigned Player 1, as today
+- [x] A second connection is assigned Player 2, and its A/D/J/K input actually moves and attacks with Player 2, instead of being ignored or misapplied to Player 1
+- [x] The moment a second client connects, Player 2 stops behaving as the stationary Idle Opponent and becomes a normal controlled Character
+- [x] If the second client disconnects, Player 2 reverts to being a stationary Idle Opponent again rather than continuing to move/attack on its own
 - [ ] Verified by connecting two separate clients simultaneously and confirming each independently controls their own Character in a real two-sided Match
 
 ## Blocked by
