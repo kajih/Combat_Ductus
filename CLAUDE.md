@@ -6,6 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is an early-stage Rust/Bevy project. `src/main.rs` currently just opens an empty window (`App::new().add_plugins(DefaultPlugins).run()`) — no game code, ECS setup, or module structure exists yet. There is no architecture to describe until real code is added; update this file once the project takes shape (e.g. plugin structure, module layout, component/resource design).
 
+## Git workflow & issue tracking
+
+- Work lives on GitHub: `origin` is `git@github.com:kajih/Combat_Ductus.git` (the repo was renamed from `Ductus_Combat` at one point — if a push ever reports the old name via a redirect, update the remote URL to match rather than relying on the redirect).
+- Branch before committing new work — don't commit directly to `main`. Push the branch and open a PR (`gh pr create`). A stacked branch (built on top of another not-yet-merged branch) should have its PR base set to that branch, not `main`, until the earlier one merges — GitHub auto-retargets the base to `main` once the branch it was pointed at gets merged/deleted.
+- Every filed issue is a markdown file under `docs/issues/<category>/<slug>.md` (`Parent`/`What to build`/`Acceptance criteria`/`Blocked by`) — this is the source of truth for design decisions and reasoning, not just a checklist.
+- Issues are also mirrored to GitHub Issues (https://github.com/kajih/Combat_Ductus/issues), one per file, labeled by their `docs/issues/` subfolder (`combat-foundation`, `audio`, `character-select`, `observability`, `spectator-mode`, `tooling` — create a new matching label if a new subfolder shows up). Each synced local file gets a `## GitHub Issue` footer linking to its GitHub counterpart; check for that footer before re-syncing a file, so a re-sync doesn't create duplicates.
+- `gh` (GitHub CLI) is authenticated on this machine and is the expected way to create/manage PRs and issues.
+
 ## Commands
 
 - **Run in dev (fast iteration, use this day-to-day): `cargo run --features dev`**
