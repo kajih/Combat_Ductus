@@ -23,3 +23,7 @@ This is the same *class* of bug `reset-input-on-disconnect.md` already fixed, bu
 ## Blocked by
 
 None - can start immediately (`restart-match.md` and `reset-input-on-disconnect.md`, both already done, are exactly what this hardens).
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/25

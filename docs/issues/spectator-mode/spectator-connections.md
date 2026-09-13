@@ -18,3 +18,7 @@ Not relevant yet as of this writing - filed for later, not blocking any current 
 ## Blocked by
 
 None - can start immediately, though see the note above about sequencing this alongside real two-client play.
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/32

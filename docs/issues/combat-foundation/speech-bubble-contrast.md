@@ -17,3 +17,7 @@ Root cause (diagnosed, not just observed): the bubble is currently plain white `
 ## Blocked by
 
 None - can start immediately (`motivational-speech-special.md`, already done, is what this fixes).
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/29

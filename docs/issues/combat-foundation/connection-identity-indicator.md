@@ -26,3 +26,7 @@ None - the spectator state this needs to detect already exists as of `second-cli
 ## Downstream dependency
 
 `character-select/pick-character-on-connect-screen.md` depends on this landing first - its character picker must only show to a connection that actually holds a real player slot, never to a spectator, which requires already knowing the connection's role.
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/27

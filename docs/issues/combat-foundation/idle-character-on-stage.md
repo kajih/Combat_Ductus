@@ -16,3 +16,7 @@ Integrate the Stage/camera setup with the Character rig — place one idle Chara
 
 - docs/issues/combat-foundation/stage-and-camera.md
 - docs/issues/combat-foundation/character-rig-compositing.md
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/11

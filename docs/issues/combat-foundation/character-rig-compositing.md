@@ -17,3 +17,7 @@ The `character_rig` compositing logic per ADR 0007 — a Character assembled at 
 ## Blocked by
 
 None - can start immediately
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/9

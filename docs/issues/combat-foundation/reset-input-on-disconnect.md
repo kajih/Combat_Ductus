@@ -15,3 +15,7 @@ When a client's WebSocket connection is dropped - closed, errored, or otherwise 
 ## Blocked by
 
 None - can start immediately (`server-skeleton.md` and `ground-movement.md`, both already done, are what this hardens).
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/19

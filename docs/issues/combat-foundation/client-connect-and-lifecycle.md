@@ -18,3 +18,7 @@ The client-side connect screen and WebSocket connection lifecycle. On launch, th
 
 - docs/issues/combat-foundation/net-protocol-messages.md
 - docs/issues/combat-foundation/server-skeleton.md
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/8

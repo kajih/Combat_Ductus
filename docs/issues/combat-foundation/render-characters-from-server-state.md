@@ -17,3 +17,7 @@ Wire the connected client to render both Characters via `character_rig`, driven 
 
 - docs/issues/combat-foundation/client-connect-and-lifecycle.md
 - docs/issues/combat-foundation/idle-character-on-stage.md
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/13

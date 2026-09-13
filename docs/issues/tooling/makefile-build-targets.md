@@ -29,3 +29,7 @@ Remaining open branch: exact target names beyond `help`/`all`/`clean` (e.g. `dev
 ## Blocked by
 
 None - purely additive tooling, doesn't depend on any unbuilt feature.
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/26

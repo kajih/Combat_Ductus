@@ -19,3 +19,7 @@ Needs to work on both native and the wasm/Trunk build - wasm needs its console-v
 ## Blocked by
 
 None - can start immediately
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/12

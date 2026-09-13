@@ -19,3 +19,7 @@ A headless `server` binary — a Bevy app using only `MinimalPlugins`, `cfg`-gat
 
 - docs/issues/combat-foundation/combat-rules-module.md
 - docs/issues/combat-foundation/net-protocol-messages.md
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/5

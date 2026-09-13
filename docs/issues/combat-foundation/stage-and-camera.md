@@ -15,3 +15,7 @@ Render the single fixed Stage (the office background art already present in the 
 ## Blocked by
 
 None - can start immediately
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/10

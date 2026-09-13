@@ -21,3 +21,7 @@ This is cheaper than it might sound: Body Type is purely cosmetic (ADR 0003) and
 - docs/issues/combat-foundation/connection-identity-indicator.md (not yet built - a connection needs to know it holds a real player slot, and not a spectator, before the picker can decide whether to show itself)
 
 `client-connect-and-lifecycle.md` and `character-rig-compositing.md`, both already done, cover everything else this needs.
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/24

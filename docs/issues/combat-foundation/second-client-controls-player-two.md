@@ -19,3 +19,7 @@ This needs the server to assign connections to player slots (first connection = 
 ## Blocked by
 
 - docs/issues/combat-foundation/reset-input-on-disconnect.md
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/20

@@ -35,3 +35,7 @@ Remaining open branch: the exact tuning values (Kick's cooldown duration, from w
 ## Blocked by
 
 None - can start immediately (`combat-rules-module.md` and `punch-kick-health-depletion.md`, both already done, are what this extends).
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/28

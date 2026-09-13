@@ -17,3 +17,7 @@ End-to-end Jump (Space): vertical repositioning for Player 1's Character, purely
 
 - docs/issues/combat-foundation/combat-rules-module.md
 - docs/issues/combat-foundation/ground-movement.md
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/18

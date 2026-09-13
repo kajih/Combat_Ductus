@@ -18,3 +18,7 @@ End-to-end Motivational Speech: pressing H sends a Special input event; the serv
 
 - docs/issues/combat-foundation/combat-rules-module.md
 - docs/issues/combat-foundation/punch-kick-health-depletion.md
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/22

@@ -18,3 +18,7 @@ Note: the PRD originally scoped this screen with no rematch/restart control (ref
 ## Blocked by
 
 - docs/issues/combat-foundation/punch-kick-health-depletion.md
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/17

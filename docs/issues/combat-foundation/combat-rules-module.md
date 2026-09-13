@@ -18,3 +18,7 @@ A pure Rust `combat` module implementing Health, damage application for Punch (1
 ## Blocked by
 
 None - can start immediately
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/7

@@ -17,3 +17,7 @@ Restrict `RequestRestart` to connections holding an actual player slot (P1 or P2
 ## Blocked by
 
 - docs/issues/combat-foundation/second-client-controls-player-two.md (done - the per-connection slot tracking this needs to distinguish a player from a spectator)
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/31

@@ -17,3 +17,7 @@ End-to-end horizontal movement: the client captures A/D key input, sends movemen
 
 - docs/issues/combat-foundation/server-skeleton.md
 - docs/issues/combat-foundation/render-characters-from-server-state.md
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/14

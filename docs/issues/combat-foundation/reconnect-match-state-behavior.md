@@ -23,3 +23,7 @@ Concretely, at minimum this should settle:
 ## Blocked by
 
 - docs/issues/combat-foundation/second-client-controls-player-two.md
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/21

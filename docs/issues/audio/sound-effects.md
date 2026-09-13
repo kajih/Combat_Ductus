@@ -16,3 +16,7 @@ Bevy's audio stack (`bevy_audio`, `rodio`/`cpal`) is already part of the depende
 ## Blocked by
 
 None - can start immediately (`punch-kick-health-depletion.md`, already done, provides everything needed for the Punch/Kick triggers; the Match-end trigger only needs the existing `MatchStatus::Ended` snapshot field, not the not-yet-built `match-end-screen.md`).
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/23

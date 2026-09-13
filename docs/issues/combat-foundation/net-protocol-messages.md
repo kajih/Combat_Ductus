@@ -16,3 +16,7 @@ A shared `net_protocol` module defining the wire message types exchanged over th
 ## Blocked by
 
 None - can start immediately
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/6

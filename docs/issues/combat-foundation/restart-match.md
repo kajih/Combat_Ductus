@@ -19,3 +19,7 @@ Pressing the control sends a request to the server; the server resets its `comba
 ## Blocked by
 
 - docs/issues/combat-foundation/match-end-screen.md
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/16

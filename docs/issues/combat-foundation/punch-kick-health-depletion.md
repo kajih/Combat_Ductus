@@ -18,3 +18,7 @@ End-to-end Punch (J) and Kick (K): the client sends the attack input event, the 
 
 - docs/issues/combat-foundation/combat-rules-module.md
 - docs/issues/combat-foundation/ground-movement.md
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/15

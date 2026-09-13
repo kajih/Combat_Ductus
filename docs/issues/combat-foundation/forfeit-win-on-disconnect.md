@@ -21,3 +21,7 @@ This needs a way to tell a forfeit win apart from a normal health-depleted win, 
 ## Blocked by
 
 - docs/issues/combat-foundation/second-client-controls-player-two.md (done - real per-slot connection tracking this needs)
+
+## GitHub Issue
+
+https://github.com/kajih/Combat_Ductus/issues/30
