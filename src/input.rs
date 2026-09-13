@@ -1,9 +1,10 @@
-//! Captures gameplay keyboard input (A/D movement, J/K attacks) and
+//! Captures gameplay keyboard input (A/D movement, J/K/H attacks) and
 //! forwards it to the server as `net_protocol::InputEvent`s - the client
 //! itself never simulates movement or combat, per ADR 0005; it only
 //! reports key state and renders whatever the server broadcasts back. See
-//! `docs/issues/combat-foundation/ground-movement.md` and
-//! `docs/issues/combat-foundation/punch-kick-health-depletion.md`.
+//! `docs/issues/combat-foundation/ground-movement.md`,
+//! `docs/issues/combat-foundation/punch-kick-health-depletion.md`, and
+//! `docs/issues/combat-foundation/motivational-speech-special.md`.
 
 use crate::connect_screen::{AppState, ConnectionSlot};
 use bevy::prelude::*;
@@ -56,5 +57,8 @@ fn send_attack_input(keys: Res<ButtonInput<KeyCode>>, mut slot: NonSendMut<Conne
     }
     if keys.just_pressed(KeyCode::KeyK) {
         slot.send_input(InputEvent::Kick);
+    }
+    if keys.just_pressed(KeyCode::KeyH) {
+        slot.send_input(InputEvent::Special);
     }
 }
