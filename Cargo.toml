@@ -10,6 +10,18 @@ default-run = "combat-ductus"
 
 [dependencies]
 bevy = "0.19.1"
+# Pulls tungstenite 0.24.0 for its own native WebSocket implementation,
+# while tokio-tungstenite below pulls a separate, newer tungstenite 0.30.0
+# - two copies of tungstenite (and several of its own transitive deps -
+# block-buffer/digest/sha1 - `cargo tree --duplicates` shows the full
+# picture) coexist in the tree. No known functional impact, just extra
+# compile time/binary size. ewebsock 0.8.0 (Nov 2024) is still its latest
+# release; its unreleased `main` branch has since bumped to tungstenite
+# 0.29 (checked 2026-09), closer but not yet a match either - there's
+# nothing to upgrade to today. Known, currently-unfixable duplication, not
+# silently rediscoverable via `cargo tree` each time - see
+# docs/issues/tooling/ewebsock-tungstenite-version-divergence.md. Revisit
+# once ewebsock next publishes a release.
 ewebsock = "0.8.0"
 rand = "0.10.2"
 serde = { version = "1.0.229", features = ["derive"] }
