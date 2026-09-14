@@ -22,12 +22,15 @@
 //! subscribe to the same broadcast, and simply never gets a player slot
 //! assigned - see `assign_slot`); and a connection ending (closed,
 //! errored, or the peer process killed outright) signals the simulation
-//! over a third `crossbeam_channel`, tagged with which slot (if any) that
-//! connection held, so it can reset whatever movement that connection last
-//! held - see `docs/issues/combat-foundation/reset-input-on-disconnect.md`
-//! and `docs/issues/combat-foundation/second-client-controls-player-two.md`.
+//! over a third `crossbeam_channel` (see `Disconnection`), tagged with
+//! which slot (if any) that connection held, so it can reset whatever
+//! movement that connection last held and, if its opponent is still a real
+//! connected client, declare a forfeit win for them - see
+//! `docs/issues/combat-foundation/reset-input-on-disconnect.md`,
+//! `docs/issues/combat-foundation/second-client-controls-player-two.md`,
+//! and `docs/issues/combat-foundation/forfeit-win-on-disconnect.md`.
 
-use crate::combat::{MOVE_SPEED_PER_TICK, MatchState, Player};
+use crate::combat::{MOVE_SPEED_PER_TICK, MatchEndReason, MatchState, Player};
 use crate::net_protocol::{
     CharacterSnapshot, InputEvent, MatchStatus, ServerMessage, StateSnapshot,
 };
@@ -38,7 +41,7 @@ use futures_util::{SinkExt, StreamExt};
 use std::io;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::Message;
@@ -49,10 +52,30 @@ const TICK_RATE_HZ: f64 = 30.0;
 /// An input event tagged with which player slot sent it, if any. `None`
 /// means the sending connection is a spectator (a 3rd+ connection - see
 /// `assign_slot`) with no Character of its own to control; movement/attack
-/// events from one of those are simply ignored, though `RequestRestart` is
-/// still honored regardless of slot (see `step_simulation`), matching its
-/// existing player-agnostic design from `restart-match.md`.
+/// events from one of those are simply ignored, and so is `RequestRestart`,
+/// restricted to a real player slot per
+/// `docs/issues/combat-foundation/restrict-restart-to-players.md` since a
+/// spectator has no stake in the Match it would be restarting.
 type TaggedInputEvent = (Option<Player>, InputEvent);
+
+/// What happened when one connection ended, for the simulation to react
+/// to. `opponent_connected` is only meaningful when `slot` is `Some` - a
+/// spectator (`slot: None`) disconnecting never triggers a forfeit,
+/// regardless of who else is connected, since it never held a Character to
+/// begin with. See
+/// `docs/issues/combat-foundation/forfeit-win-on-disconnect.md`.
+#[derive(Debug, Clone, Copy)]
+pub struct Disconnection {
+    /// Which player slot (if any) the ended connection held - `None` means
+    /// it was a spectator.
+    pub slot: Option<Player>,
+    /// Whether the *other* player slot was still held by a real, settled
+    /// connected client (see `SlotAssignment::is_settled`) at the instant
+    /// this connection ended - the fact a forfeit hinges on, per
+    /// `forfeit-win-on-disconnect.md`'s decision that a disconnect only
+    /// forfeits the Match when both slots were real, connected players.
+    pub opponent_connected: bool,
+}
 
 /// The pieces a caller needs to run the server: the address it actually
 /// bound to (useful when binding to port 0), and the channels connecting
@@ -62,10 +85,8 @@ pub struct ServerParts {
     pub incoming_rx: CbReceiver<TaggedInputEvent>,
     pub outgoing_tx: broadcast::Sender<String>,
     /// Fires once per connection, the moment that connection is fully gone
-    /// (clean close, error, or an abrupt drop), carrying whichever player
-    /// slot (if any) that connection held - see
-    /// `docs/issues/combat-foundation/reset-input-on-disconnect.md`.
-    pub disconnected_rx: CbReceiver<Option<Player>>,
+    /// (clean close, error, or an abrupt drop) - see `Disconnection`.
+    pub disconnected_rx: CbReceiver<Disconnection>,
 }
 
 /// Which player slots are currently held by a connected client. Shared
@@ -82,7 +103,26 @@ pub struct ServerParts {
 struct SlotAssignment {
     p1_taken: bool,
     p2_taken: bool,
+    /// When each slot most recently transitioned from vacant to taken -
+    /// `None` while vacant. Used only to debounce the forfeit check (see
+    /// `is_settled`) - slot assignment itself (`assign_slot`) never
+    /// consults this.
+    p1_taken_since: Option<Instant>,
+    p2_taken_since: Option<Instant>,
 }
+
+/// How long a slot must have been *continuously* taken before its occupant
+/// counts as a real opponent for forfeit purposes. Guards against a narrow
+/// but real race: detecting a connection's disconnect is never instant (it
+/// takes a failed send on the *next* broadcast tick to notice at all), and
+/// in that brief window an unrelated connection can claim the *other*,
+/// already-vacant slot and vanish again before the original disconnect is
+/// even processed - which, checked naively, reads identically to "the
+/// opponent was real and connected." Real players never reconnect within
+/// a fraction of a tick of each other; this only ever debounces that
+/// impossible-for-a-human timing, not genuine gameplay. See
+/// `docs/issues/combat-foundation/forfeit-win-on-disconnect.md`.
+const MIN_OPPONENT_SETTLE: Duration = Duration::from_millis(75);
 
 impl SlotAssignment {
     fn is_taken(&self, player: Player) -> bool {
@@ -93,10 +133,37 @@ impl SlotAssignment {
     }
 
     fn set_taken(&mut self, player: Player, taken: bool) {
+        let since = taken.then(Instant::now);
         match player {
-            Player::P1 => self.p1_taken = taken,
-            Player::P2 => self.p2_taken = taken,
+            Player::P1 => {
+                self.p1_taken = taken;
+                self.p1_taken_since = since;
+            }
+            Player::P2 => {
+                self.p2_taken = taken;
+                self.p2_taken_since = since;
+            }
         }
+    }
+
+    /// Whether `player`'s slot is not just taken, but has been taken for
+    /// at least `MIN_OPPONENT_SETTLE` continuously - see its doc comment.
+    fn is_settled(&self, player: Player) -> bool {
+        let taken_since = match player {
+            Player::P1 => self.p1_taken_since,
+            Player::P2 => self.p2_taken_since,
+        };
+        taken_since.is_some_and(|since| since.elapsed() >= MIN_OPPONENT_SETTLE)
+    }
+}
+
+/// The other of the two player slots - used at disconnect time to check
+/// whether *that* slot is still held by a real connected client (see
+/// `Disconnection::opponent_connected`).
+fn other_player(player: Player) -> Player {
+    match player {
+        Player::P1 => Player::P2,
+        Player::P2 => Player::P1,
     }
 }
 
@@ -119,7 +186,7 @@ fn assign_slot(slots: &Mutex<SlotAssignment>) -> Option<Player> {
 /// the OS pick a free port, e.g. in tests).
 pub fn spawn_network_thread(bind_addr: &str) -> io::Result<ServerParts> {
     let (incoming_tx, incoming_rx) = crossbeam_channel::unbounded::<TaggedInputEvent>();
-    let (disconnected_tx, disconnected_rx) = crossbeam_channel::unbounded::<Option<Player>>();
+    let (disconnected_tx, disconnected_rx) = crossbeam_channel::unbounded::<Disconnection>();
     let (outgoing_tx, _) = broadcast::channel::<String>(32);
     let outgoing_tx_for_net = outgoing_tx.clone();
     let bind_addr = bind_addr.to_string();
@@ -173,7 +240,7 @@ async fn accept_connections(
     listener: TcpListener,
     incoming_tx: CbSender<TaggedInputEvent>,
     outgoing: broadcast::Sender<String>,
-    disconnected_tx: CbSender<Option<Player>>,
+    disconnected_tx: CbSender<Disconnection>,
     slots: Arc<Mutex<SlotAssignment>>,
 ) {
     loop {
@@ -258,14 +325,25 @@ async fn accept_connections(
             // simulation (tagged with the same slot) so it can stop
             // applying whatever movement this connection last held,
             // instead of a Character walking on forever with no one left
-            // to release the key.
-            if let Some(player) = slot {
-                slots
-                    .lock()
-                    .expect("slot assignment mutex was poisoned")
-                    .set_taken(player, false);
-            }
-            let _ = disconnected_tx.send(slot);
+            // to release the key. Check whether the *other* slot is still
+            // taken before releasing this one - that's the forfeit
+            // decision (see `Disconnection`) - and check it under the same
+            // lock acquisition as the release itself, so a concurrent
+            // connect/disconnect on the other slot can't race between the
+            // two.
+            let opponent_connected = if let Some(player) = slot {
+                let mut slots = slots.lock().expect("slot assignment mutex was poisoned");
+                let opponent = other_player(player);
+                let opponent_connected = slots.is_taken(opponent) && slots.is_settled(opponent);
+                slots.set_taken(player, false);
+                opponent_connected
+            } else {
+                false
+            };
+            let _ = disconnected_tx.send(Disconnection {
+                slot,
+                opponent_connected,
+            });
         });
     }
 }
@@ -317,7 +395,7 @@ impl HeldMovement {
 struct OutgoingSnapshots(broadcast::Sender<String>);
 
 #[derive(Resource)]
-struct DisconnectedConnections(CbReceiver<Option<Player>>);
+struct DisconnectedConnections(CbReceiver<Disconnection>);
 
 /// Run the headless simulation loop. Blocks forever (this is the server
 /// binary's whole reason to exist), stepping `combat::MatchState` on a
@@ -326,7 +404,7 @@ struct DisconnectedConnections(CbReceiver<Option<Player>>);
 pub fn run_bevy_app(
     incoming_rx: CbReceiver<TaggedInputEvent>,
     outgoing_tx: broadcast::Sender<String>,
-    disconnected_rx: CbReceiver<Option<Player>>,
+    disconnected_rx: CbReceiver<Disconnection>,
 ) {
     App::new()
         .add_plugins(
@@ -353,12 +431,21 @@ fn step_simulation(
     // A connection ending - reset whatever movement it left held, or that
     // Character keeps walking in that direction forever with no one left
     // to release the key. `None` (a spectator disconnecting) never held
-    // any movement in the first place, so there's nothing to reset.
-    // `try_recv` draining a channel that may have more than one queued
-    // signal is harmless - the reset itself is idempotent.
-    while let Ok(slot) = disconnected.0.try_recv() {
+    // any movement in the first place, so there's nothing to reset, and
+    // never forfeits the Match either. `try_recv` draining a channel that
+    // may have more than one queued signal is harmless - the reset is
+    // idempotent, and `MatchState::forfeit` already no-ops once the Match
+    // has ended (including from an earlier forfeit in the same drain).
+    while let Ok(Disconnection {
+        slot,
+        opponent_connected,
+    }) = disconnected.0.try_recv()
+    {
         if let Some(player) = slot {
             held.reset(player);
+            if opponent_connected {
+                match_state.0.forfeit(player);
+            }
         }
     }
 
@@ -383,11 +470,13 @@ fn step_simulation(
                 }
             }
             InputEvent::RequestRestart => {
-                // Not tied to a specific player - honored regardless of
-                // slot (even from a spectator), same as before a second
-                // slot existed. Only honored once the Match has actually
-                // ended - this resets a concluded Match, not an active one.
-                if match_state.0.has_ended() {
+                // Restricted to a connection holding a real player slot -
+                // a spectator's request is silently ignored, the same way
+                // its movement/attack input already is (see
+                // `restrict-restart-to-players.md`). Also only honored once
+                // the Match has actually ended - this resets a concluded
+                // Match, not an active one.
+                if slot.is_some() && match_state.0.has_ended() {
                     match_state.0 = MatchState::new();
                     // A player holding a movement key at the instant the
                     // Match ended stops sending input entirely once the
@@ -440,9 +529,18 @@ fn snapshot_from_state(state: &MatchState) -> StateSnapshot {
         tick: state.tick,
         p1: character_snapshot(&state.p1),
         p2: character_snapshot(&state.p2),
-        status: match state.winner {
-            Some(winner) => MatchStatus::Ended { winner },
-            None => MatchStatus::InProgress,
+        status: match (state.winner, state.end_reason) {
+            (Some(winner), Some(reason)) => MatchStatus::Ended { winner, reason },
+            (Some(winner), None) => {
+                // Shouldn't happen (`MatchState` always sets both together)
+                // - falls back to the more common case rather than
+                // panicking on a snapshot conversion.
+                MatchStatus::Ended {
+                    winner,
+                    reason: MatchEndReason::Defeated,
+                }
+            }
+            (None, _) => MatchStatus::InProgress,
         },
     }
 }
@@ -757,6 +855,89 @@ mod tests {
         })
         .await
         .expect("timed out waiting for a new connection to control P1");
+    }
+
+    #[tokio::test]
+    async fn a_real_players_mid_match_disconnect_forfeits_the_match_to_the_remaining_player() {
+        let ServerParts {
+            local_addr,
+            incoming_rx,
+            outgoing_tx,
+            disconnected_rx,
+        } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
+
+        let url = format!("ws://{local_addr}");
+        let (mut p1, _) = tokio_tungstenite::connect_async(url.clone())
+            .await
+            .expect("first client should be able to connect");
+        let (p2, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("second client should be able to connect");
+
+        // Both slots are real connected clients now - confirm the Match is
+        // actually under way, and give P1's slot a moment to genuinely
+        // settle (see `MIN_OPPONENT_SETTLE`) before forfeiting it, the same
+        // as any real Match would already be well past by the time anyone
+        // disconnects.
+        for _ in 0..10 {
+            assert_eq!(read_snapshot(&mut p1).await.status, MatchStatus::InProgress);
+        }
+
+        // P2 vanishes mid-Match - same as a killed client process.
+        drop(p2);
+
+        let ended = tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                let snapshot = read_snapshot(&mut p1).await;
+                if matches!(snapshot.status, MatchStatus::Ended { .. }) {
+                    return snapshot;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the remaining player to see a forfeit win");
+
+        assert_eq!(
+            ended.status,
+            MatchStatus::Ended {
+                winner: Player::P1,
+                reason: MatchEndReason::Forfeit,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn disconnecting_while_the_other_slot_is_still_the_idle_opponent_does_not_end_the_match()
+    {
+        let ServerParts {
+            local_addr,
+            incoming_rx,
+            outgoing_tx,
+            disconnected_rx,
+        } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
+
+        let url = format!("ws://{local_addr}");
+        let (p1, _) = tokio_tungstenite::connect_async(url.clone())
+            .await
+            .expect("first client should be able to connect");
+
+        // P1 disconnects while P2 is still an unclaimed Idle Opponent - no
+        // real opponent to award a win to, so this is a no-op for the
+        // Match, exactly like today (see `player_two_reverts_to_idle...`'s
+        // sibling case, and `a_freed_player_slot_is_reassigned...` for the
+        // slot itself becoming available again).
+        drop(p1);
+
+        let (mut observer, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("observer client should be able to connect");
+
+        for _ in 0..10 {
+            let snapshot = read_snapshot(&mut observer).await;
+            assert_eq!(snapshot.status, MatchStatus::InProgress);
+        }
     }
 
     #[tokio::test]
@@ -1382,6 +1563,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_spectators_restart_request_has_no_effect_but_a_players_still_works() {
+        let ServerParts {
+            local_addr,
+            incoming_rx,
+            outgoing_tx,
+            disconnected_rx,
+        } = spawn_network_thread("127.0.0.1:0").expect("server should bind to a free port");
+        std::thread::spawn(move || run_bevy_app(incoming_rx, outgoing_tx, disconnected_rx));
+
+        let url = format!("ws://{local_addr}");
+        let (mut p1, _) = tokio_tungstenite::connect_async(url.clone())
+            .await
+            .expect("first client should be able to connect");
+        let (_p2, _) = tokio_tungstenite::connect_async(url.clone())
+            .await
+            .expect("second client should be able to connect");
+
+        move_p1_into_attack_range_of_p2(&mut p1).await;
+        let mut expected_health = STARTING_HEALTH;
+        for _ in 0..STARTING_HEALTH {
+            expected_health -= PUNCH_DAMAGE;
+            throw_p1_attack_until(&mut p1, InputEvent::Punch, |snapshot| {
+                snapshot.p2.health <= expected_health
+            })
+            .await;
+        }
+        tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                if matches!(
+                    read_snapshot(&mut p1).await.status,
+                    MatchStatus::Ended { .. }
+                ) {
+                    return;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the match to end");
+
+        // Both player slots are already taken, so this connects as a
+        // spectator - joining only now (after the Match already ended)
+        // means its own snapshot stream starts clean, with no backlog of
+        // earlier in-progress frames to wade through first.
+        let (mut spectator, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("spectator client should be able to connect");
+        assert!(matches!(
+            read_snapshot(&mut spectator).await.status,
+            MatchStatus::Ended { .. }
+        ));
+
+        // A spectator has no player slot - its RequestRestart should be
+        // silently ignored, leaving the Match ended.
+        send_event(&mut spectator, InputEvent::RequestRestart).await;
+        for _ in 0..10 {
+            let snapshot = read_snapshot(&mut spectator).await;
+            assert!(matches!(snapshot.status, MatchStatus::Ended { .. }));
+        }
+
+        // A real player's RequestRestart still works, exactly as before.
+        send_event(&mut p1, InputEvent::RequestRestart).await;
+        let restarted = tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                let snapshot = read_snapshot(&mut spectator).await;
+                if matches!(snapshot.status, MatchStatus::InProgress) {
+                    return snapshot;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the match to restart");
+        assert_eq!(restarted.p1.health, STARTING_HEALTH);
+        assert_eq!(restarted.p2.health, STARTING_HEALTH);
+    }
+
+    #[tokio::test]
     async fn a_connection_joining_after_the_match_has_ended_sees_ended_status_immediately() {
         // See docs/adr/0009-reconnecting-inherits-current-match-state.md -
         // a late connection gets the truthful current status right away,
@@ -1434,11 +1691,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_connection_taking_over_a_vacated_slot_inherits_its_current_state_not_a_fresh_start()
+    async fn a_connection_taking_over_a_forfeited_slot_inherits_the_ended_match_not_a_fresh_start()
     {
         // See docs/adr/0009-reconnecting-inherits-current-match-state.md -
         // no reset-on-reconnect, or a losing player could escape a bad
-        // position just by disconnecting and reconnecting.
+        // position (or, since forfeit-win-on-disconnect.md, a forfeited
+        // Match) just by disconnecting and reconnecting. P2 disconnecting
+        // from an ongoing real-vs-real Match is exactly what forfeits it
+        // now (a_real_players_mid_match_disconnect_forfeits...), so this is
+        // the scenario ADR 0009 itself anticipates: a connection joining
+        // after the Match has already ended sees the truthful Ended status
+        // and the Health it actually ended with, not a reset.
         let ServerParts {
             local_addr,
             incoming_rx,
@@ -1455,8 +1718,10 @@ mod tests {
             .await
             .expect("second client should be able to connect");
 
-        // Land one Punch on P2 (not a killing blow - the Match must still
-        // be in progress afterward), then P2 disconnects.
+        // Land one Punch on P2 (not a killing blow - Health should freeze
+        // right here once the forfeit below ends the Match, not reach 0
+        // some other way), then give P1's slot time to settle
+        // (`MIN_OPPONENT_SETTLE`) before P2 disconnects.
         move_p1_into_attack_range_of_p2(&mut p1).await;
         send_event(&mut p1, InputEvent::Punch).await;
         let damaged = tokio::time::timeout(StdDuration::from_secs(5), async {
@@ -1470,41 +1735,54 @@ mod tests {
         .await
         .expect("timed out waiting for the punch to land");
         assert_eq!(damaged.p2.health, STARTING_HEALTH - PUNCH_DAMAGE);
+        for _ in 0..10 {
+            read_snapshot(&mut p1).await;
+        }
 
         drop(p2);
 
-        // A fresh connection claims the now-free P2 slot - confirmed by
-        // actually being able to move P2 (proving it's really controlling
-        // that slot, not just observing the global broadcast, which any
-        // spectator would also see). Retry (as in
+        tokio::time::timeout(StdDuration::from_secs(5), async {
+            loop {
+                if matches!(
+                    read_snapshot(&mut p1).await.status,
+                    MatchStatus::Ended { .. }
+                ) {
+                    return;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for P2's disconnect to forfeit the match");
+
+        // A fresh connection claims the now-free P2 slot - confirmed by its
+        // own one-time YourSlot message, since P2 can no longer prove
+        // control by moving (the Match has already ended, so movement is a
+        // no-op regardless of who sends it). Retry (as in
         // a_freed_player_slot_is_reassigned_to_the_next_connection) since
         // the slot may not have freed up by the very first attempt.
-        let inherited_health = tokio::time::timeout(StdDuration::from_secs(5), async {
+        let inherited = tokio::time::timeout(StdDuration::from_secs(5), async {
             loop {
                 let Ok((mut ws, _)) = tokio_tungstenite::connect_async(url.clone()).await else {
                     continue;
                 };
-                let health_on_arrival = read_snapshot(&mut ws).await.p2.health;
-                send_event(&mut ws, InputEvent::MoveLeft(true)).await;
-                let controls_p2 = tokio::time::timeout(StdDuration::from_millis(500), async {
-                    loop {
-                        let snapshot = read_snapshot(&mut ws).await;
-                        if snapshot.p2.position < damaged.p2.position {
-                            return;
-                        }
-                    }
-                })
-                .await
-                .is_ok();
-                if controls_p2 {
-                    return health_on_arrival;
+                if read_server_message(&mut ws).await
+                    == Some(ServerMessage::YourSlot(Some(Player::P2)))
+                {
+                    return read_snapshot(&mut ws).await;
                 }
             }
         })
         .await
         .expect("timed out waiting for a new connection to control the vacated P2 slot");
 
-        assert_eq!(inherited_health, STARTING_HEALTH - PUNCH_DAMAGE);
+        assert_eq!(inherited.p2.health, STARTING_HEALTH - PUNCH_DAMAGE);
+        assert_eq!(
+            inherited.status,
+            MatchStatus::Ended {
+                winner: Player::P1,
+                reason: MatchEndReason::Forfeit,
+            }
+        );
     }
 
     async fn send_event(

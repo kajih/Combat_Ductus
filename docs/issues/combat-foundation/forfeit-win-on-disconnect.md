@@ -12,11 +12,13 @@ This needs a way to tell a forfeit win apart from a normal health-depleted win, 
 
 ## Acceptance criteria
 
-- [ ] When both player slots are held by real connected clients and one disconnects while the Match is in progress, the Match immediately ends with the remaining player declared the winner
-- [ ] A disconnect while the other slot is still an unclaimed Idle Opponent does not end the Match or declare a winner - the remaining player's Match continues exactly as today
-- [ ] The Match-Ended screen distinguishes a forfeit win from a normal health-depleted win, indicating the opponent disconnected
-- [ ] A disconnect after the Match has already ended has no additional effect (mirrors `restart-match.md`'s existing "only meaningful while in progress" pattern)
-- [ ] Verified by disconnecting one of two real connected clients mid-Match and confirming the remaining client immediately sees a forfeit-win screen naming the disconnect
+- [x] When both player slots are held by real connected clients and one disconnects while the Match is in progress, the Match immediately ends with the remaining player declared the winner
+- [x] A disconnect while the other slot is still an unclaimed Idle Opponent does not end the Match or declare a winner - the remaining player's Match continues exactly as today
+- [x] The Match-Ended screen distinguishes a forfeit win from a normal health-depleted win, indicating the opponent disconnected
+- [x] A disconnect after the Match has already ended has no additional effect (mirrors `restart-match.md`'s existing "only meaningful while in progress" pattern) - `MatchState::forfeit` respects the same `has_ended()` guard every other state-mutating method does
+- [x] Verified by disconnecting one of two real connected clients mid-Match and confirming the remaining client immediately sees a forfeit-win screen naming the disconnect - covered by an automated `server_net` integration test over real WebSocket connections (`a_real_players_mid_match_disconnect_forfeits_the_match_to_the_remaining_player`), not manually eyeballed
+
+**Implementation note:** detecting a disconnect is never instant (it takes a failed broadcast send on the *next* tick to notice at all), which opened a narrow race - an unrelated connection briefly claiming the *other*, already-vacant slot in that detection window could read identically to "the opponent was real and connected." Fixed with a short occupancy-settle debounce (`server_net::MIN_OPPONENT_SETTLE`, 75ms) - a slot only counts as a real opponent for forfeit purposes once it's been continuously taken for at least that long. Real players never reconnect within a fraction of a tick of each other, so this only ever debounces impossible-for-a-human timing, not genuine gameplay; discovered via `a_freed_player_slot_is_reassigned_to_the_next_connection` and `a_connection_taking_over_a_vacated_slot_inherits_its_current_state_not_a_fresh_start` (renamed to `a_connection_taking_over_a_forfeited_slot_inherits_the_ended_match_not_a_fresh_start`, since its own scenario - P2 disconnecting from an ongoing real-vs-real Match - is now exactly what forfeits it) going from reliably passing to reliably failing once forfeit landed.
 
 ## Blocked by
 
