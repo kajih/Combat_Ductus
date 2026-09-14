@@ -10,20 +10,23 @@ Past the early-stage/empty-window point — a real client/server versus fighter 
 - **`server`** (`src/bin/server.rs`) — headless (`MinimalPlugins`, no rendering), native-only (`#[cfg(not(target_arch = "wasm32"))]` — a browser tab can't bind a listening socket). Owns the one authoritative `combat::MatchState` and steps it every tick regardless of who's connected.
 
 Shared library modules (`src/lib.rs`, used by both binaries):
-- **`combat`** — the deep module: pure Rust, no Bevy/networking dependency. Health, damage, range checks, Jump's arc, Special's gating and cooldown, Match-end/winner detection. The only module carrying unit tests.
+- **`combat`** — the deep module: pure Rust, no Bevy/networking dependency. Health, damage, range checks, Jump's arc, Special's gating and cooldown, Match-end/winner detection (including a forfeit's `MatchEndReason` alongside a health-depleted one). The only module carrying unit tests — `src/combat.rs` is the production code, `src/combat/tests.rs` the test module (a folder module, not a separate top-level module — everything is still `crate::combat::*`).
 - **`net_protocol`** — shared wire types (`InputEvent`, `StateSnapshot`, `MatchStatus`), plain serde structs/enums, JSON over WebSocket. Compiles identically on `wasm32-unknown-unknown` and native.
-- **`server_net`** (native-only) — the server binary's guts: WebSocket accept loop (per-connection player-slot assignment, spectator fallback, disconnect handling) on a small tokio runtime, plus the Bevy app that steps `combat::MatchState` on a fixed ~30Hz schedule and broadcasts snapshots.
+- **`server_net`** (native-only) — the server binary's guts: WebSocket accept loop (per-connection player-slot assignment, spectator fallback, disconnect/forfeit handling) on a small tokio runtime, plus the Bevy app that steps `combat::MatchState` on a fixed ~30Hz schedule and broadcasts snapshots. A folder module: `src/server_net.rs` is the slim root (shared types, `mod` declarations, and the only two re-exported public functions), `src/server_net/accept.rs` the accept loop, `src/server_net/simulation.rs` the Bevy app/systems, `src/server_net/tests.rs` the integration test suite (driven over real WebSocket connections against a real local server) — all still `crate::server_net::*`, never separate top-level modules.
 - **`client_net`** — the client's WebSocket connection wrapper (`ewebsock`), compiles on both targets with one poll-based API.
 
 Client-only modules (`src/*.rs`, wired up in `main.rs`):
 - **`connect_screen`** — the Connect screen UI, connection lifecycle, the `AppState` state machine (`Connecting` → `InMatch` → `MatchEnded`), and the `LatestSnapshot` resource everything else reads from.
+- **`role_indicator`** — a small on-screen indicator of which slot (P1/P2/spectator) this connection holds, resetting on disconnect.
 - **`character_rig`** — composites a Character at runtime from layered torso/arm/leg/face sprite entities per (Body Type, Facing), per ADR 0007/0006.
 - **`match_characters`** — spawns/positions both Characters from server snapshots, drives Punch/Kick limb-swing poses and the Motivational Speech bubble.
 - **`health_hud`** — plain Health readout overlay, no polish by design.
-- **`match_end_screen`** — the "X wins" screen and its restart control.
+- **`match_end_screen`** — the "X wins" (or "X wins - Y disconnected!" for a forfeit) screen and its restart control, restricted server-side to a real player slot.
 - **`input`** — captures A/D/Space/J/K/H and forwards them to the server as `InputEvent`s; never simulates locally.
 - **`stage`** — the single fixed Stage backdrop and its static camera.
 - **`asset_diagnostics`** — logs image asset load success/failure (a first slice of `docs/issues/observability/logging.md`).
+
+A module that outgrows one file this way (production code dwarfed by its own test suite, or itself sprawling) becomes a folder module — the file keeps the module's name (`server_net.rs`, not `mod.rs`) and stays the slim root; the pieces live alongside it in a same-named folder. External code never sees the difference: only the root re-exports anything, so `server_net::spawn_network_thread` etc. stay exactly as callable as before the split. Prefer this over actually splitting a module's *responsibilities* into separate top-level modules unless they're genuinely independent concerns.
 
 Update this section again once the architecture changes meaningfully (a new milestone, a new module boundary) rather than letting it drift stale.
 
