@@ -7,3 +7,13 @@ ignore = ["target", "dist", ".git"]
 
 [serve]
 open = true
+# Bind all interfaces, not just loopback (Trunk's default), so other machines
+# on the office LAN can load the client from this dev server - the game is
+# built for LAN play, so the host has to be reachable by the other player.
+#
+# Must be `address` (singular). Trunk 0.21.14 also accepts an `addresses`
+# list, but silently ignores it: it prints the same "server listening at"
+# banner listing every LAN IP while actually binding nothing at all, so the
+# log looks correct and every connection is refused. Verify with
+# `ss -tln | grep 8080` rather than trusting the banner.
+address = "0.0.0.0"

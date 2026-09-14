@@ -15,7 +15,44 @@ use combat_ductus::client_net::{Connection, ConnectionEvent};
 use combat_ductus::combat::Player;
 use combat_ductus::net_protocol::{InputEvent, StateSnapshot};
 
-const DEFAULT_SERVER_ADDRESS: &str = "127.0.0.1:9000";
+/// The port the server listens on by default (`server::main`'s
+/// `0.0.0.0:9000`). The Connect screen's address field stays editable, so
+/// this is only the starting guess.
+/// Only the wasm path builds an address from parts; the native fallback is
+/// already a complete `host:port` string.
+#[cfg(target_arch = "wasm32")]
+const DEFAULT_SERVER_PORT: u16 = 9000;
+
+const LOOPBACK_FALLBACK: &str = "127.0.0.1:9000";
+
+/// What the Connect screen's address field starts out containing.
+///
+/// In the browser this is the host that served the page, not a hardcoded
+/// loopback address. The game is played over the office LAN, where the
+/// server binary and the Trunk dev server run on the same machine - so
+/// whoever's browser loaded the page from `http://192.168.1.112:8080` wants
+/// to connect to `192.168.1.112:9000`, and the browser already knows that
+/// host. Defaulting to `127.0.0.1` instead meant every player but the host
+/// pointed at their *own* machine, where nothing is listening, and got a
+/// silent connection timeout with no hint that the address was the problem.
+///
+/// Falls back to loopback when there's no `window`/hostname to read (and on
+/// native builds, where the developer running both halves locally is the
+/// only case that matters).
+fn default_server_address() -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let hostname = web_sys::window()
+            .and_then(|window| window.location().hostname().ok())
+            .filter(|hostname| !hostname.is_empty());
+
+        if let Some(hostname) = hostname {
+            return format!("{hostname}:{DEFAULT_SERVER_PORT}");
+        }
+    }
+
+    LOOPBACK_FALLBACK.to_string()
+}
 
 /// The client's top-level screen/flow state.
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -127,7 +164,7 @@ fn spawn_connect_screen(mut commands: Commands) {
 
             parent.spawn((
                 ServerAddressInput,
-                EditableText::new(DEFAULT_SERVER_ADDRESS),
+                EditableText::new(default_server_address()),
                 Node {
                     width: Val::Px(260.0),
                     height: Val::Px(36.0),

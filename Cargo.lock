@@ -2070,6 +2070,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-tungstenite",
+ "web-sys",
 ]
 
 [[package]]

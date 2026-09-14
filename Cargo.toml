@@ -32,6 +32,11 @@ serde_json = "1.0.151"
 # the browser's Web Crypto API instead.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.4", features = ["wasm_js"] }
+# Lets the Connect screen default to the host that served the page, instead
+# of a hardcoded 127.0.0.1 that means "this browser's own machine" on every
+# computer but the host's - see connect_screen::default_server_address.
+# Already in the tree via bevy; named here only to use it directly.
+web-sys = { version = "0.3.105", features = ["Window", "Location"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 crossbeam-channel = "0.5.17"
