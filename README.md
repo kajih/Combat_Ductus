@@ -11,14 +11,19 @@ It's a client/server game: a native **server** binary runs the one authoritative
   ```
   rustup target add wasm32-unknown-unknown
   ```
+  Note that rustup targets are installed **per toolchain**, not per machine — if you switch your default toolchain (say from stable to nightly), run this again for the new one, or the web build fails with `can't find crate for 'core'` / `the wasm32-unknown-unknown target may not be installed`.
 - **[Trunk](https://trunkrs.dev/)**, the tool that builds and serves the browser client:
   ```
   cargo install trunk
   ```
+  Trunk downloads `wasm-bindgen` and `wasm-opt` into its own cache on first use, so those don't need installing separately.
 
-That's everything required. Two more things are optional, Windows-only build-speed setup (see [`CLAUDE.md`](CLAUDE.md) for details) — skip them and the project still builds fine, just slower to iterate on:
+That's everything required. The remaining setup is optional build-speed tuning (see [`CLAUDE.md`](CLAUDE.md) for details) — skip it and the project still builds fine, just slower to iterate on. `.cargo/config.toml` swaps in a faster linker per platform, so install whichever matches yours:
 
-- `rustup component add llvm-tools-preview` and `cargo install cargo-binutils`, so `.cargo/config.toml` can point the linker at the faster `rust-lld.exe`. If you don't have these, either install them or delete `.cargo/config.toml` to fall back to the default linker.
+- **Linux**: `clang` and `mold` (on Arch, `pacman -S clang mold`).
+- **Windows**: `rustup component add llvm-tools-preview` and `cargo install cargo-binutils`, for `rust-lld.exe`.
+
+If you have neither, delete `.cargo/config.toml` to fall back to the default linker.
 
 ## Building and running
 

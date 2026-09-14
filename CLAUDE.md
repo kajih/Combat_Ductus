@@ -63,7 +63,9 @@ A root `Makefile` wraps the commands above (and the web-build ones below) as `ma
 - `dist/` is build output, gitignored — never commit it.
 - Never pass `--features dev` for web builds — dynamic linking doesn't apply/work on wasm32.
 
-Requires the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`) and `trunk` (`cargo install trunk`) — both already set up on this machine.
+Requires the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`) and `trunk` (`cargo install trunk`) — both set up on this machine. Trunk fetches `wasm-bindgen` and `wasm-opt` into its own cache on first use; they don't need to be on `PATH`.
+
+**rustup targets are per toolchain**: if the default toolchain changes (this machine defaults to `nightly`, and also has `stable` and `esp` installed), the wasm target has to be added again for the new one. Otherwise the web build — and `make all` with it — fails partway through dependency compilation with `error[E0463]: can't find crate for 'core'` and `note: the wasm32-unknown-unknown target may not be installed`. Check with `rustup target list --installed` before assuming anything subtler; `rustup +stable target list --installed` shows a *different* set.
 
 **Known-working `trunk` version on Windows**: `trunk build --release`'s `wasm-opt` post-processing step previously failed on this machine with `error copying (optimized) wasm file to dist dir: The system cannot find the path specified. (os error 3)` (root cause never conclusively diagnosed — see `docs/issues/tooling/trunk-build-release-fails-on-windows.md`). Confirmed working, reproducibly, with `trunk 0.21.14`. If this resurfaces on a different `trunk` version, that's a signal it may in fact be version-specific after all.
 
@@ -71,10 +73,12 @@ Requires the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-
 
 ## Fast-compile setup (already configured)
 
-This repo is set up per Bevy's official Windows fast-compiles guide:
+This repo is set up per Bevy's official fast-compiles guide:
 
 - **`[features] dev = ["bevy/dynamic_linking"]`** in `Cargo.toml` — opt-in dynamic linking (see Commands above).
 - **`[profile.dev]` split** in `Cargo.toml` — our own crate compiles at `opt-level = 1` (fast, unoptimized) while all dependencies, including Bevy, compile at `opt-level = 3` (needed both for dynamic linking to work on Windows and because a fully-unoptimized Bevy is too slow at runtime to be usable).
-- **`.cargo/config.toml`** — pins the linker to `rust-lld.exe` for `x86_64-pc-windows-msvc`, which is significantly faster than the default MSVC linker. Requires the `llvm-tools-preview` rustup component and `cargo-binutils` (both already installed on this machine via `rustup component add llvm-tools-preview` and `cargo install cargo-binutils`) — if setting up a fresh machine, reinstall those two first.
+- **`.cargo/config.toml`** — replaces the default platform linker, which is the single biggest cost in Bevy's incremental builds. It carries one block per platform, and cargo only applies the one matching the host target, so both can stay checked in as the project moves between machines:
+  - `x86_64-unknown-linux-gnu` — `clang` as the linker driver with **mold** doing the actual linking (`-Clink-arg=-fuse-ld=mold`). Needs `clang` and `mold` on `PATH` (Arch: `pacman -S clang mold`; both already installed on this machine). Confirm it took effect with `readelf -p .comment target/debug/server | grep mold`.
+  - `x86_64-pc-windows-msvc` — `rust-lld.exe`, significantly faster than the default MSVC linker. Requires the `llvm-tools-preview` rustup component and `cargo-binutils` (`rustup component add llvm-tools-preview`, `cargo install cargo-binutils`).
 
-If cloning onto a machine without `rust-lld.exe` on `PATH`, either install the two components above or delete `.cargo/config.toml` to fall back to the default linker (slower, but no extra setup).
+If cloning onto a machine that has neither the platform's fast linker nor its prerequisites, either install them or delete `.cargo/config.toml` to fall back to the default linker (slower, but no extra setup).
