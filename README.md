@@ -49,7 +49,7 @@ COMBAT_DUCTUS_SERVER_ADDR=127.0.0.1:9000 cargo run --bin server
 trunk serve
 ```
 
-Builds for `wasm32-unknown-unknown`, serves on `http://localhost:8080`, opens a browser tab, and rebuilds automatically on file changes. Open that URL (or share the host machine's LAN IP with other players on the same network), type in the server's address on the Connect screen, and play.
+Builds for `wasm32-unknown-unknown`, serves on `http://localhost:8080`, opens a browser tab, and rebuilds automatically on file changes. To play with someone else, see [Playing over the LAN](#playing-over-the-lan) below.
 
 For a real, optimized build (much smaller than the `trunk serve` dev output, which is 100MB+ and expected to be that large): `trunk build --release`, output goes to `dist/` (gitignored — never commit it).
 
@@ -60,6 +60,54 @@ cargo run --features dev
 ```
 
 `--features dev` enables Bevy's dynamic linking, which cuts incremental rebuild times drastically. **Never** use it for a release build (it requires shipping `bevy_dylib` alongside the binary) or for the web build (dynamic linking doesn't apply to `wasm32-unknown-unknown` at all). A plain `cargo build` produces a release-equivalent, statically-linked binary.
+
+## Playing over the LAN
+
+Both players load the client from the **host** machine — the one running the server binary and the Trunk dev server. Nothing needs installing on the other machine; it just needs a browser.
+
+On the host:
+
+1. **Start the server** (it must stay running — if it exits, the Connect screen just times out):
+   ```
+   cargo run --bin server
+   ```
+   It listens on `0.0.0.0:9000`, i.e. all interfaces.
+
+2. **Serve the client**:
+   ```
+   trunk serve
+   ```
+   `Trunk.toml` sets `address = "0.0.0.0"` so this is reachable from other machines. Trunk binds **loopback only** by default, which is the single easiest way to end up with a dev server nobody else can reach.
+
+3. **Find the host's LAN IP**:
+   ```
+   ip -4 -br addr        # Linux
+   ipconfig              # Windows
+   ```
+
+4. **Open the firewall** for ports 8080 (the page) and 9000 (the game). On Linux with `ufw`, scoped to the LAN rather than the world:
+   ```
+   sudo ufw allow from 192.168.0.0/16 to any port 8080 proto tcp
+   sudo ufw allow from 192.168.0.0/16 to any port 9000 proto tcp
+   ```
+
+On the other machine, browse to `http://<host-LAN-IP>:8080`. The Connect screen pre-fills the address with the host that served the page, so it should already read `<host-LAN-IP>:9000` — just hit Connect.
+
+### When it doesn't work
+
+A **timeout** (rather than a refused connection) almost always means a packet is being dropped rather than a service being down. Work outwards from the host:
+
+| Check | Command (on the host) | Expect |
+| --- | --- | --- |
+| Server is running | `ss -tln \| grep 9000` | `0.0.0.0:9000` |
+| Trunk is serving beyond loopback | `ss -tln \| grep 8080` | `0.0.0.0:8080`, **not** `127.0.0.1:8080` |
+| Firewall | `sudo ufw status verbose` | 8080 and 9000 allowed |
+| Basic reachability | `ping <host-IP>` *from the other machine* | replies |
+
+Two traps worth knowing, both of which cost real time once:
+
+- **Trunk's `addresses` (plural) key is silently ignored.** It logs a completely normal `server listening at ...` banner listing every LAN IP while binding nothing at all. Use the singular `address`, and trust `ss`, not the banner.
+- **A host with two interfaces on overlapping subnets** can reply out the wrong one, which also looks like a timeout. `ip route` shows which interface wins for a given destination.
 
 ## Testing and linting
 

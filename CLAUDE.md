@@ -59,6 +59,7 @@ A root `Makefile` wraps the commands above (and the web-build ones below) as `ma
 
 - **Run in browser (dev, fast iteration): `trunk serve`** — builds for `wasm32-unknown-unknown`, serves on `http://localhost:8080` and opens a browser tab, and rebuilds on file changes.
 - Production web build: `trunk build --release` — output goes to `dist/` (wasm-opt'd, much smaller than the dev build; a plain `trunk build`/`trunk serve` dev build is large — 100MB+ unoptimized `.wasm` with debug info — that's expected).
+- **LAN play**: `Trunk.toml` sets `[serve] address = "0.0.0.0"` so other machines on the LAN can load the client — Trunk otherwise binds loopback only. Use the singular `address` key: the `addresses` list form is silently ignored by trunk 0.21.14, which then logs a normal "server listening at" banner (LAN IPs and all) while binding nothing. Trust `ss -tln | grep 8080`, not the banner.
 - `index.html` is the Trunk entry point (`<link data-trunk rel="rust" .../>` tells Trunk to build this crate); `Trunk.toml` configures the dist dir and dev server.
 - `dist/` is build output, gitignored — never commit it.
 - Never pass `--features dev` for web builds — dynamic linking doesn't apply/work on wasm32.
