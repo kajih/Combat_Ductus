@@ -7,7 +7,7 @@
 //! these types is the job of `server_net` (server-side) and, in a later
 //! issue, the client's own connection module.
 
-use crate::combat::{Attack, Facing, Player};
+use crate::combat::{Attack, Facing, MatchEndReason, Player};
 use serde::{Deserialize, Serialize};
 
 /// A single input event sent from the client to the server for the tick it
@@ -73,11 +73,17 @@ pub struct CharacterSnapshot {
 }
 
 /// Whether the Match is still being played or has already ended, and if so
-/// by whom. Terminal once `Ended` — v1 has no rematch/restart flow.
+/// by whom and why (`combat::MatchEndReason` — a health-depleted win reads
+/// very differently to the loser than a forfeit). Terminal once `Ended` —
+/// a Match only leaves this state via an explicit restart
+/// (`InputEvent::RequestRestart`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MatchStatus {
     InProgress,
-    Ended { winner: Player },
+    Ended {
+        winner: Player,
+        reason: MatchEndReason,
+    },
 }
 
 /// The full state snapshot broadcast from server to client every tick.
@@ -169,9 +175,19 @@ mod tests {
     }
 
     #[test]
-    fn ended_match_status_round_trips_with_winner() {
-        let status = MatchStatus::Ended { winner: Player::P2 };
-        assert_eq!(round_trip(&status), status);
+    fn ended_match_status_round_trips_with_winner_and_reason() {
+        for status in [
+            MatchStatus::Ended {
+                winner: Player::P2,
+                reason: MatchEndReason::Defeated,
+            },
+            MatchStatus::Ended {
+                winner: Player::P2,
+                reason: MatchEndReason::Forfeit,
+            },
+        ] {
+            assert_eq!(round_trip(&status), status);
+        }
     }
 
     #[test]

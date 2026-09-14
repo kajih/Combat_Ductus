@@ -230,6 +230,20 @@ impl CharacterState {
     }
 }
 
+/// Why a Match ended, alongside who won (`MatchState::winner`) — a health
+/// depleted win reads very differently to the loser than one they never
+/// actually got to fight for. See
+/// `docs/issues/combat-foundation/forfeit-win-on-disconnect.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MatchEndReason {
+    /// The winner depleted the loser's Health via a landed Punch, Kick, or
+    /// Special.
+    Defeated,
+    /// The loser's connection disconnected mid-Match while the winner's
+    /// connection was still present — see `MatchState::forfeit`.
+    Forfeit,
+}
+
 /// The full simulated state of one Match, and the single source of truth
 /// the server steps every tick (ADR 0005 — the client never simulates).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -238,8 +252,12 @@ pub struct MatchState {
     pub p1: CharacterState,
     pub p2: CharacterState,
     /// `None` while the Match is in progress; set the instant a Character's
-    /// Health reaches 0. Terminal — a Match is never restarted in v1.
+    /// Health reaches 0, or a forfeit is declared (`forfeit`). Terminal — a
+    /// Match is never restarted in v1.
     pub winner: Option<Player>,
+    /// `None` exactly when `winner` is `None` — set alongside it, always,
+    /// by whichever of `apply_attack`/`forfeit` actually decided the Match.
+    pub end_reason: Option<MatchEndReason>,
 }
 
 impl MatchState {
@@ -249,6 +267,7 @@ impl MatchState {
             p1: CharacterState::new(-ATTACK_RANGE * 2.0, Facing::Right),
             p2: CharacterState::new(ATTACK_RANGE * 2.0, Facing::Left),
             winner: None,
+            end_reason: None,
         }
     }
 
@@ -388,9 +407,31 @@ impl MatchState {
 
         if defender_state.health == 0 {
             self.winner = Some(attacker);
+            self.end_reason = Some(MatchEndReason::Defeated);
         }
 
         true
+    }
+
+    /// Directly declares the winner of a forfeit: `disconnected`'s
+    /// connection just ended mid-Match while their opponent's connection
+    /// was still present, so the opponent wins without landing a hit. A
+    /// no-op if the Match has already ended, whichever way — a forfeit can
+    /// never overwrite an already-decided Match, the same guard every other
+    /// state-mutating method here already respects via `has_ended()`.
+    ///
+    /// Deciding *whether* a disconnect actually warrants a forfeit (both
+    /// slots held by real connected clients at the moment of disconnect,
+    /// not one of them the stationary Idle Opponent) is `server_net`'s job,
+    /// not this method's — by the time this is called, that's already
+    /// decided. This only ever decides *who won*, given *who left*.
+    pub fn forfeit(&mut self, disconnected: Player) {
+        if self.has_ended() {
+            return;
+        }
+
+        self.winner = Some(disconnected.opponent());
+        self.end_reason = Some(MatchEndReason::Forfeit);
     }
 }
 
@@ -684,6 +725,7 @@ mod tests {
         assert_eq!(m.p2.health, 0);
         assert!(m.has_ended());
         assert_eq!(m.winner, Some(Player::P1));
+        assert_eq!(m.end_reason, Some(MatchEndReason::Defeated));
     }
 
     #[test]
@@ -981,5 +1023,35 @@ mod tests {
         m.p2 = state_at(1.0, Facing::Left);
 
         assert!(m.apply_attack(Player::P1, Attack::Punch));
+    }
+
+    #[test]
+    fn forfeit_declares_the_disconnected_players_opponent_the_winner() {
+        let mut m = MatchState::new();
+
+        m.forfeit(Player::P1);
+
+        assert!(m.has_ended());
+        assert_eq!(m.winner, Some(Player::P2));
+        assert_eq!(m.end_reason, Some(MatchEndReason::Forfeit));
+    }
+
+    #[test]
+    fn forfeit_does_not_overwrite_an_already_decided_match() {
+        let mut m = MatchState::new();
+        m.p1 = state_at(0.0, Facing::Right);
+        m.p2 = state_at(1.0, Facing::Left);
+        m.p2.health = 1;
+
+        assert!(m.apply_attack(Player::P1, Attack::Punch));
+        assert_eq!(m.winner, Some(Player::P1));
+        assert_eq!(m.end_reason, Some(MatchEndReason::Defeated));
+
+        // P2 (the loser) "disconnecting" after the fact should not flip the
+        // Match into a forfeit win for P1 who, per this method's contract,
+        // already won fair and square.
+        m.forfeit(Player::P2);
+        assert_eq!(m.winner, Some(Player::P1));
+        assert_eq!(m.end_reason, Some(MatchEndReason::Defeated));
     }
 }

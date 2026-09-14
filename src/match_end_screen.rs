@@ -14,7 +14,7 @@
 use crate::connect_screen::{AppState, ConnectionSlot, LatestSnapshot};
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button as WidgetButton};
-use combat_ductus::combat::Player;
+use combat_ductus::combat::{MatchEndReason, Player};
 use combat_ductus::net_protocol::{InputEvent, MatchStatus};
 
 #[derive(Component)]
@@ -64,17 +64,22 @@ fn detect_match_restarted(
 }
 
 fn spawn_match_end_screen(mut commands: Commands, latest_snapshot: Res<LatestSnapshot>) {
-    let winner = latest_snapshot.0.as_ref().and_then(|snapshot| {
-        if let MatchStatus::Ended { winner } = snapshot.status {
-            Some(winner)
+    let outcome = latest_snapshot.0.as_ref().and_then(|snapshot| {
+        if let MatchStatus::Ended { winner, reason } = snapshot.status {
+            Some((winner, reason))
         } else {
             None
         }
     });
 
-    let message = match winner {
-        Some(Player::P1) => "Player 1 wins!",
-        Some(Player::P2) => "Player 2 wins!",
+    // A forfeit win reads very differently to the loser than one they
+    // never actually got to fight for - see
+    // docs/issues/combat-foundation/forfeit-win-on-disconnect.md.
+    let message = match outcome {
+        Some((Player::P1, MatchEndReason::Defeated)) => "Player 1 wins!",
+        Some((Player::P2, MatchEndReason::Defeated)) => "Player 2 wins!",
+        Some((Player::P1, MatchEndReason::Forfeit)) => "Player 1 wins - Player 2 disconnected!",
+        Some((Player::P2, MatchEndReason::Forfeit)) => "Player 2 wins - Player 1 disconnected!",
         // Shouldn't happen (this state is only ever entered because a
         // snapshot just reported Ended), but stays harmless if it does.
         None => "Match ended.",

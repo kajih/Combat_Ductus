@@ -10,9 +10,9 @@ Restrict `RequestRestart` to connections holding an actual player slot (P1 or P2
 
 ## Acceptance criteria
 
-- [ ] A connection holding the P1 or P2 slot can still restart an ended Match, as today
-- [ ] A spectator's `RequestRestart` has no effect - the Match stays ended until a real player restarts it
-- [ ] Verified by having a spectator send `RequestRestart` after a Match ends and confirming the Match stays ended until a P1/P2 connection sends it
+- [x] A connection holding the P1 or P2 slot can still restart an ended Match, as today
+- [x] A spectator's `RequestRestart` has no effect - the Match stays ended until a real player restarts it
+- [x] Verified by having a spectator send `RequestRestart` after a Match ends and confirming the Match stays ended until a P1/P2 connection sends it - covered by an automated `server_net` integration test over real WebSocket connections (`a_spectators_restart_request_has_no_effect_but_a_players_still_works`)
 
 ## Blocked by
 
