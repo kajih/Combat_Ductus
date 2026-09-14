@@ -62,6 +62,8 @@ A root `Makefile` wraps the commands above (and the web-build ones below) as `ma
 
 Requires the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`) and `trunk` (`cargo install trunk`) — both already set up on this machine.
 
+**Known-working `trunk` version on Windows**: `trunk build --release`'s `wasm-opt` post-processing step previously failed on this machine with `error copying (optimized) wasm file to dist dir: The system cannot find the path specified. (os error 3)` (root cause never conclusively diagnosed — see `docs/issues/tooling/trunk-build-release-fails-on-windows.md`). Confirmed working, reproducibly, with `trunk 0.21.14`. If this resurfaces on a different `trunk` version, that's a signal it may in fact be version-specific after all.
+
 **getrandom on wasm32-unknown-unknown**: `rand`/`uuid` pull in `getrandom`, which has no OS RNG source on wasm32-unknown-unknown and fails to compile there without help. `Cargo.toml` adds a target-specific `getrandom` dependency with the `wasm_js` feature enabled (routes randomness through the browser's Web Crypto API) — see `[target.'cfg(target_arch = "wasm32")'.dependencies]`. Don't remove this or wasm builds will fail with a `compile_error!` from `getrandom`.
 
 ## Fast-compile setup (already configured)
