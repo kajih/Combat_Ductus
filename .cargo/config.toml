@@ -1,2 +1,17 @@
+# Per-platform fast linkers, per Bevy's official fast-compiles guide. Linking
+# dominates Bevy's incremental build times, so the default platform linker is
+# the single biggest thing worth replacing. Both sections are inert on the
+# other platform - cargo only applies the block matching the host target - so
+# this file is safe to keep checked in while the project moves between
+# machines (it started on Windows, now also builds on Linux).
+
+# Linux: clang as the linker driver, with mold doing the actual linking.
+# Requires `clang` and `mold` on PATH (Arch: `pacman -S clang mold`).
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-Clink-arg=-fuse-ld=mold"]
+
+# Windows: rust-lld is substantially faster than the default MSVC linker.
+# Requires the `llvm-tools-preview` rustup component and `cargo-binutils`.
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld.exe"
