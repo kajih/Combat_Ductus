@@ -7,6 +7,15 @@
 //! (`render-characters-from-server-state.md`) - this only has to get the
 //! connection lifecycle right and keep the latest snapshot around
 //! (`LatestSnapshot`) for that later work to read.
+//!
+//! One module split across a folder (`tests.rs` alongside this file), not
+//! two - the lifecycle this owns is stateful enough to be worth testing
+//! against a real server, and that test suite brings enough scaffolding of
+//! its own to keep out of this file. Everything in it is still
+//! `connect_screen::tests`; nothing outside this module sees it at all.
+
+#[cfg(test)]
+mod tests;
 
 use bevy::prelude::*;
 use bevy::text::EditableText;
