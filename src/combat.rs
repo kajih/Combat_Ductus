@@ -65,14 +65,30 @@ pub const ATTACK_RANGE: f32 = 1.5;
 
 /// Ticks between successive Kicks, measured from either Character's last
 /// Punch *or* Kick (a shared cooldown clock, not a per-attack one - see
-/// `CharacterState::last_attack_tick`). Placeholder tuning value; kept
-/// longer than `ATTACK_ANIMATION_TICKS` so a Kick's own swing always
-/// finishes well before it's usable again.
-pub const KICK_COOLDOWN_TICKS: u64 = 16;
+/// `CharacterState::last_attack_tick`). Kept longer than
+/// `ATTACK_ANIMATION_TICKS` so a Kick's own swing always finishes well
+/// before it's usable again.
+///
+/// Tuned from playtest feedback (`tune-punch-kick-cooldown.md`): Kick at
+/// 16 ticks threw far too freely for what is meant to be the heavy,
+/// committed attack, so it was slowed to 250% of that - ~1.33s at the
+/// server's ~30Hz tick rate.
+pub const KICK_COOLDOWN_TICKS: u64 = 40;
 /// Ticks between successive Punches, measured the same way. Punch has a
-/// shorter, steadier cadence than Kick - half of Kick's cooldown, not a
-/// separate "two free punches" allowance.
-pub const PUNCH_COOLDOWN_TICKS: u64 = KICK_COOLDOWN_TICKS / 2;
+/// shorter, steadier cadence than Kick - not a separate "two free
+/// punches" allowance.
+///
+/// Deliberately a standalone constant rather than a fraction of
+/// `KICK_COOLDOWN_TICKS`: the same playtest that slowed Kick found 16
+/// ticks (~0.53s) to be exactly the right Punch cadence, and pinning
+/// Punch to half of Kick would have dragged it to 20 as a side effect of
+/// tuning a different attack. The invariant that actually matters is
+/// `PUNCH_COOLDOWN_TICKS < KICK_COOLDOWN_TICKS`, asserted in the tests.
+pub const PUNCH_COOLDOWN_TICKS: u64 = 16;
+/// Punch is the quicker attack. Now that the two cooldowns are tuned
+/// independently, nothing else enforces that - so fail the build, not a
+/// playtest, if a future retune ever inverts them.
+const _: () = assert!(PUNCH_COOLDOWN_TICKS < KICK_COOLDOWN_TICKS);
 
 pub const SPECIAL_DAMAGE: u8 = 1;
 /// Motivational Speech can only be cast when the opponent is farther away
@@ -459,7 +475,7 @@ fn in_attack_range(attacker: &CharacterState, defender: &CharacterState) -> bool
 
 /// Whether enough ticks have passed since `attacker`'s last Punch *or* Kick
 /// for a new `attack` (Punch or Kick) to be thrown. Kick requires the full
-/// `KICK_COOLDOWN_TICKS`; Punch only half that - either attack gates the
+/// `KICK_COOLDOWN_TICKS`; Punch a shorter one - either attack gates the
 /// other, since both read from the same shared `last_attack_tick`.
 fn attack_cooldown_elapsed(attacker: &CharacterState, attack: Attack, tick: u64) -> bool {
     let threshold = match attack {
