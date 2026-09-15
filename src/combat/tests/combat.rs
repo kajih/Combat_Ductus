@@ -149,14 +149,19 @@ fn a_second_attack_restarts_the_animation_duration() {
     m.p1 = state_at(0.0, Facing::Right);
     m.p2 = state_at(1.0, Facing::Left);
 
-    // A Kick first, so the second attack (a Punch, needing only half
-    // Kick's cooldown) is already off cooldown by the time it's thrown
-    // below - it's the animation restart being tested here, not the
-    // cooldown gate.
     m.apply_attack(Player::P1, Attack::Kick);
     for _ in 0..ATTACK_ANIMATION_TICKS - 1 {
         m.advance_tick();
     }
+
+    // Both cooldowns are now longer than ATTACK_ANIMATION_TICKS (see
+    // tune-punch-kick-cooldown.md), so a Character can no longer reach
+    // this case through its own attacks at all - its swing always
+    // finishes before either attack is usable again. Clear the shared
+    // cooldown clock explicitly, so what's under test here stays the
+    // animation restart rather than the gate standing in front of it.
+    m.p1.last_attack_tick = None;
+
     // One tick from clearing - a fresh attack now should restart the
     // full duration rather than clearing on the next tick anyway.
     assert!(m.apply_attack(Player::P1, Attack::Punch));
@@ -186,7 +191,7 @@ fn kick_requires_a_full_cooldown_since_the_last_punch_or_kick() {
 }
 
 #[test]
-fn punch_requires_only_half_the_kick_cooldown_since_the_last_punch_or_kick() {
+fn punch_requires_its_own_shorter_cooldown_since_the_last_punch_or_kick() {
     let mut m = MatchState::new();
     m.p1 = state_at(0.0, Facing::Right);
     m.p2 = state_at(1.0, Facing::Left);
@@ -203,7 +208,7 @@ fn punch_requires_only_half_the_kick_cooldown_since_the_last_punch_or_kick() {
 }
 
 #[test]
-fn a_kick_delays_the_next_punch_by_half_the_kick_cooldown() {
+fn a_kick_delays_the_next_punch_by_punchs_own_cooldown() {
     // Either attack gates the other, per punch-kick-cooldown.md - a
     // Kick blocks a following Punch too, not just a following Kick.
     let mut m = MatchState::new();

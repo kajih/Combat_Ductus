@@ -17,10 +17,29 @@ Retune the Punch/Kick cooldown constants in `combat.rs` after manual playtesting
 
 ## Acceptance criteria
 
-- [ ] `KICK_COOLDOWN_TICKS` increased to 250% of its current value (16 -> 40 ticks, or an equivalent increase if the tick rate or other tuning has changed by the time this is picked up)
-- [ ] Punch's cooldown lands at roughly today's `KICK_COOLDOWN_TICKS` value (~16 ticks) - not still a strict half of the new, larger Kick value, unless that also happens to land close to 16
-- [ ] Existing `combat.rs` unit tests covering the cooldown mechanism (`kick_requires_a_full_cooldown_since_the_last_punch_or_kick`, `punch_requires_only_half_the_kick_cooldown_since_the_last_punch_or_kick`, `a_kick_delays_the_next_punch_by_half_the_kick_cooldown`, `cooldown_gated_attack_starts_no_animation_and_deals_no_damage`) still pass - they're written generically against the constants rather than hardcoded tick counts, so most should keep passing unchanged; update any that assume the exact 2x Punch/Kick ratio if that relationship is dropped
-- [ ] Verified by manual playtest against the live server (not unit tests alone) - Punch should feel like today's Kick pace, Kick should feel noticeably slower than that
+- [x] `KICK_COOLDOWN_TICKS` increased to 250% of its current value (16 -> 40 ticks, or an equivalent increase if the tick rate or other tuning has changed by the time this is picked up)
+- [x] Punch's cooldown lands at roughly today's `KICK_COOLDOWN_TICKS` value (~16 ticks) - not still a strict half of the new, larger Kick value, unless that also happens to land close to 16 - **the two constants were decoupled**, so Punch sits at exactly 16 rather than the 20 that keeping the halving would have produced. A compile-time `const _: () = assert!(PUNCH_COOLDOWN_TICKS < KICK_COOLDOWN_TICKS)` now guards the ordering the halving used to guarantee for free
+- [x] Existing `combat.rs` unit tests covering the cooldown mechanism still pass - they were written generically against the constants, so none needed logic changes. Two were *renamed*, since their names asserted the dropped 2x relationship: `punch_requires_only_half_the_kick_cooldown_since_the_last_punch_or_kick` -> `punch_requires_its_own_shorter_cooldown_since_the_last_punch_or_kick`, and `a_kick_delays_the_next_punch_by_half_the_kick_cooldown` -> `a_kick_delays_the_next_punch_by_punchs_own_cooldown`
+- [ ] Verified by manual playtest against the live server (not unit tests alone) - Punch should feel like today's Kick pace, Kick should feel noticeably slower than that. **Still open**: the code change is tested and lands here, but nobody has played it yet. Worth doing on the same LAN playtest as `verify-connect-screen-default-in-browser.md`
+
+## Finding: both cooldowns now outlast the attack animation
+
+`ATTACK_ANIMATION_TICKS` is 10. With Punch at 16 and Kick at 40, a Character's
+swing now always finishes before either attack is usable again - which was
+already the stated intent for Kick ("kept longer than `ATTACK_ANIMATION_TICKS`"),
+and is now true for Punch as well.
+
+That made one existing test, `a_second_attack_restarts_the_animation_duration`,
+unreachable through gameplay: it threw a Kick and then a Punch 9 ticks later,
+which the old 8-tick Punch cooldown allowed and the new 16-tick one does not.
+The animation-restart behaviour it covers still exists in `start_attack_animation`,
+so the test now clears `last_attack_tick` explicitly to keep the animation
+restart under test rather than the cooldown gate in front of it.
+
+Worth knowing at the next playtest: attack animations can no longer visibly
+overlap or re-trigger mid-swing for a single Character. If that reads as
+sluggish rather than weighty, `ATTACK_ANIMATION_TICKS` is the knob, not the
+cooldowns.
 
 ## Blocked by
 
