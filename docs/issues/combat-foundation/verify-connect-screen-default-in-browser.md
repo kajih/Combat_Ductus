@@ -28,7 +28,7 @@ If `hostname()` turns out to be empty or unexpected in some browser, the fallbac
 
 ## Blocked by
 
-- PR #54 (`lan-play-from-other-machines`) being merged - that's what introduces the behaviour to verify
+None - PR #54 (`lan-play-from-other-machines`), which introduced the behaviour to verify, merged as `58703f4`. This is ready to do on the next LAN playtest.
 
 ## GitHub Issue
 

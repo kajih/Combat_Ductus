@@ -10,14 +10,18 @@ Not relevant yet as of this writing - filed for later, not blocking any current 
 
 ## Acceptance criteria
 
-- [ ] The server assigns each connection a role (P1, P2, or spectator) as it connects, rather than blindly applying all input to Player 1
-- [ ] A spectator connection's input, if it sends any, has no effect on the Match
-- [ ] A spectator's client receives the same state snapshots as a playing client and renders the same live Match
-- [ ] Verified by connecting three clients simultaneously - two controlling players, one spectating - and confirming the spectator observes without affecting the Match
+- [x] The server assigns each connection a role (P1, P2, or spectator) as it connects, rather than blindly applying all input to Player 1 - `server_net::accept` assigns the first free slot and falls back to spectator (`slot: None`), and tells the connection which it got via the one-time `YourSlot` message (`each_connection_is_told_its_own_slot_right_after_connecting`)
+- [x] A spectator connection's input, if it sends any, has no effect on the Match - movement/attacks are dropped in `server_net::simulation` for a connection with no slot (`a_third_connection_is_a_spectator_and_controls_neither_player`), and `RequestRestart` is silently ignored the same way (`a_spectators_restart_request_has_no_effect_but_a_players_still_works`, added later by `restrict-restart-to-players.md`)
+- [x] A spectator's client receives the same state snapshots as a playing client and renders the same live Match - the broadcast channel is multi-subscriber and slot-agnostic, and no client-side renderer (`match_characters`, `health_hud`, `stage`) gates on slot; `role_indicator` shows "Spectating" so the role is legible on screen
+- [x] Verified by connecting three clients simultaneously - two controlling players, one spectating - and confirming the spectator observes without affecting the Match - by the integration test above, which opens three real WebSocket connections against a real local server and asserts across ten ticks that the spectator's input moves neither Character. Not re-done as a manual three-browser playtest; the test covers the same scenario at the protocol level.
 
 ## Blocked by
 
 None - can start immediately, though see the note above about sequencing this alongside real two-client play.
+
+## Outcome
+
+Closed as already-satisfied rather than built. The sequencing note above turned out to be exactly right: the connection-identity groundwork this issue described as "the real work" was built by `second-client-controls-player-two.md` (#20) and `connection-identity-indicator.md` (#27), and the spectator behaviour came with it, as this issue predicted it would.
 
 ## GitHub Issue
 

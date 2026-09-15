@@ -18,7 +18,7 @@ This is cheaper than it might sound: Body Type is purely cosmetic (ADR 0003) and
 
 ## Blocked by
 
-- docs/issues/combat-foundation/connection-identity-indicator.md (not yet built - a connection needs to know it holds a real player slot, and not a spectator, before the picker can decide whether to show itself)
+None - `docs/issues/combat-foundation/connection-identity-indicator.md` (done, #27) was the last blocker. A connection now learns whether it holds a real player slot or is spectating from the server's one-time `YourSlot` message, which is exactly what the picker needs to decide whether to show itself.
 
 `client-connect-and-lifecycle.md` and `character-rig-compositing.md`, both already done, cover everything else this needs.
 
